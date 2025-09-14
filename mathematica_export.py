@@ -2,6 +2,7 @@ import subprocess, shlex, os, shutil, json
 from typing import Any
 from llm_client import api_call
 from dataclasses import dataclass
+import re
 
 def _resolve_wolframscript() -> str:
     # Prefer explicit env override
@@ -150,5 +151,7 @@ if __name__=="__main__":
   </output_format>
 </code_editing_rules>
 """
-    if api_call(prompt=prompt):
-        print(f"This is the common value: {api_call(prompt=prompt)}")
+    res = api_call(prompt=prompt)
+    if res:
+        print(res)
+        
