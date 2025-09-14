@@ -4,5 +4,5 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
-        stages: [commit]
+        stages: [pre-commit]
         additional_dependencies: []
