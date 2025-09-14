@@ -177,7 +177,6 @@ def api_call(*, prompt: str, parse: bool = False, coerce_numbers: bool = False):
         stream = stream_text(prompt)
         # Join streamed chunks without inserting extra spaces; normalize whitespace.
         b = ''.join(a for a in stream).strip()
-        print(b)
         if b in arr:
             final_value = b
             break
