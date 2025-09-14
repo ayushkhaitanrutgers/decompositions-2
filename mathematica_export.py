@@ -65,12 +65,21 @@ def attempt_proof(vars,conds, lhs, rhs):
     # Demo usages
     for c in range(1):
         status= False
+        # normalize WL heads without changing math content
+        lhs_wl = lhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
+        rhs_wl = rhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
+        # ensure proper braces/sequence for vars and conds
+        vars_text = vars.strip()
+        if vars_text.startswith('{') and vars_text.endswith('}'):
+            vars_text = vars_text[1:-1]
+        conds_text = conds.strip()
+        if conds_text.startswith('{') and conds_text.endswith('}'):
+            conds_text = conds_text[1:-1]
         a=wl_eval(f"""witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
   Module[{{S}}, S = If[conds === {{}}, True, And @@ conds];
    Resolve[ForAll[vars, Implies[S, lhs <= 10^c*rhs]], Reals]];
 
-witnessBigO[{vars}, {conds}, {lhs}, 
- {rhs}, {c}]
+witnessBigO[{{{vars_text}}}, {{{conds_text}}}, {lhs_wl}, {rhs_wl}, {c}]
     """)
         if a == 'True':
             status = True
@@ -114,38 +123,32 @@ class question:
     lhs: str
     rhs: str
     
-question_1 = question(variables = "{x,y}", domain_description="{x>0, y>1}", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
+question_1 = question(variables = "x, y", domain_description="{x>0, y>1}", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
 
-res = attempt_proof("{x,y}", "{x > 0, y > 1, x <= 2 Log[y]}", "x*y", "y*Log[y]+exp[x]")
+res = attempt_proof(question_1.variables, "{x > 0, y > 1, x <= 2 Log[y]}", question_1.lhs, question_1.rhs)
 print(res)
 
 
-# def prove(question: question):
-#     prompt = f"""I want to prove that in the domain of {question.variables} defined by the conditions: {question.domain_description}, we have that {question.lhs} <= {question.rhs}. This proof becomes very elementary if
-#     the domain can be divided into the appropriate subdomains. Find the correct decomposition of the domain for me. Be very careful. Determine the sub-domains correctly. 
-#     You are the best mathematical LLM in the world. You don't make mistakes of this kind at all. 
-#     Here are the instructions for your output
-#     1. If you are using inequality signs, just use <, >, <= or >=. Don't use \le, \leq, etc
-#     2. Give me the various subdomains in an array [] with the subdomains as separate elements of this array.
-#     3. When you write a subdomain, write it in the following form: {{subdomain 1, condition 1, condition 2}}, where the conditions are what I told you before. No explanations, no latex or other symbols,nothing. Moreover, it should be one string. An example is '{{x>0, y>1, x>=...}}'
-#     Basically, the output should be one string separated by comma's, and enclosed by {{}} braces
-#     4. Your exp and log should be written in the form: exp[function] and log[function]. Note () braces
-#     5. In general, there be at least two subdomains that you've decomposed the domain into. So your output should be [{{}},{{}},...]"""
-#     result = api_call(prompt = prompt, parse= True)
-#     print(result)
+if __name__=="__main__":
+    prompt = """<code_editing_rules>
+  <guiding_principles>
+    – Be precise, avoid conflicting instructions
+    – Use natural subdomains so inequality proof is trivial
+    – Minimize the number of subdomains
+    – Output only subdomains, no extra words or symbols
+    – Use only <=, >=, <, >, Log[], Exp[] in the output
+  </guiding_principles>
 
-#     count=0
-#     domains={}
-#     for num in range(len(result)):
-#         res = attempt_proof(question.variables,"{x>0, y>1, x >= Log[y]}", question.lhs, question.rhs)
-#         domains[result[num]] = res
-#         if res == "It is proved":
-#             count=count+1
-#     if count == len(result):
-#         print(f'Fully proved : {domains}')
-#     else:
-#         print(f'Not fully proved : {domains}')
-        
-# if __name__=="__main__":
-#     prove(question_1)
-    
+  <task>
+    Given domain: x>0, y>1
+    Inequality: x*y <= y*Log[y] + Exp[x]
+    Find minimal subdomains that make inequality trivial
+  </task>
+
+  <output_format>
+    [x>0, y>1, subdomain1, x>0, y>1, subdomain2, ...]. Hence, your output should in the form of an array
+  </output_format>
+</code_editing_rules>
+"""
+    if api_call(prompt=prompt):
+        print(f"This is the common value: {api_call(prompt=prompt)}")
