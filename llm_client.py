@@ -182,7 +182,7 @@ def api_call(*, prompt: str, parse: bool = False, coerce_numbers: bool = False):
             break
         else:
             arr.append(b)
-        if i==5:
+        if i==15:
             print('No common value found')
             break
             

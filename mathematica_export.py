@@ -126,8 +126,8 @@ class question:
     
 question_1 = question(variables = "x, y", domain_description="x>0, y>1", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
 
-res = attempt_proof(question_1.variables, question_1.domain_description+", x <= 2 Log[y]", question_1.lhs, question_1.rhs)
-print(res)
+# res = attempt_proof(question_1.variables, question_1.domain_description+", x <= 2 Log[y]", question_1.lhs, question_1.rhs)
+# print(res)
 
 
 def try_and_prove(question : question):
@@ -155,10 +155,15 @@ def try_and_prove(question : question):
     if res:
         if res[0]=='[' and res[-1]==']':
             res = res[1:-1]
+            print(res)
             temp_arr = [element.strip() for element in res.split(',')]
             if len(temp_arr)!=0:
+                count = 0
                 for num in range(len(temp_arr)):
-                    print(attempt_proof(question.variables, question.domain_description+f", {temp_arr[num]}", question.lhs, question.rhs))
+                    print(f"""The proof attempt in {temp_arr[num]} : {attempt_proof(question.variables, question.domain_description+f', {temp_arr[num]}', question.lhs, question.rhs)}""")
+                    count+=1
+                if count == len(temp_arr):
+                    print('Proved everywhere')
         
 if __name__ == "__main__":
     try_and_prove(question_1)
