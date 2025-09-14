@@ -125,7 +125,7 @@ class question:
     rhs: str
     
 question_1 = question(variables = "x, y", domain_description="x>0, y>1", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
-
+question_2 = question(variables = "x,y,z", domain_description = "x>0, y>0, z>0", lhs = "(x*y*z)^(1/3)", rhs = "(x+y+z)/3")
 # res = attempt_proof(question_1.variables, question_1.domain_description+", x <= 2 Log[y]", question_1.lhs, question_1.rhs)
 # print(res)
 
@@ -137,17 +137,19 @@ def try_and_prove(question : question):
     – Use natural subdomains so inequality proof is trivial
     – Minimize the number of subdomains
     – Output only subdomains, no extra words or symbols
-    – Use only <=, >=, <, >, Log[], Exp[] in the output
+    – Use only <=, >=, <, >, Log[], Exp[] in the output. 
+    Only use Mathematical notation that the software Mathematica can parse
   </guiding_principles>
 
   <task>
     Given domain: {question.domain_description}
     Inequality: {question.lhs} <= {question.rhs}
-    Find minimal subdomains that make inequality trivial
+    Find minimal subdomains that make proving the inequality/asymptotic estimate trivial.
+    The union of these subdomains should be the whole domain.
   </task>
 
   <output_format>
-    [x > 0 && y > 1 && subdomain1, x > 0 && y > 1 && subdomain2, ...]. Hence, your output should in the form of an array
+    [{' && '.join([p.strip() for p in question.domain_description.split(',')])} && subdomain1, {' && '.join([p.strip() for p in question.domain_description.split(',')])} && subdomain2, ...]. Hence, your output should in the form of an array
   </output_format>
 </code_editing_rules>
 """
@@ -167,4 +169,3 @@ def try_and_prove(question : question):
         
 if __name__ == "__main__":
     try_and_prove(question_1)
-        
