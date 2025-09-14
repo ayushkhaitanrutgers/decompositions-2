@@ -124,9 +124,9 @@ class question:
     lhs: str
     rhs: str
     
-question_1 = question(variables = "x, y", domain_description="{x>0, y>1}", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
+question_1 = question(variables = "x, y", domain_description="x>0, y>1", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
 
-res = attempt_proof(question_1.variables, "{x > 0, y > 1, x <= 2 Log[y]}", question_1.lhs, question_1.rhs)
+res = attempt_proof(question_1.variables, question_1.domain_description+", x <= 2 Log[y]", question_1.lhs, question_1.rhs)
 print(res)
 
 
@@ -147,11 +147,17 @@ if __name__=="__main__":
   </task>
 
   <output_format>
-    [x>0, y>1, subdomain1, x>0, y>1, subdomain2, ...]. Hence, your output should in the form of an array
+    [x > 0 && y > 1 && subdomain1, x > 0 && y > 1 && subdomain2, ...]. Hence, your output should in the form of an array
   </output_format>
 </code_editing_rules>
 """
     res = api_call(prompt=prompt)
     if res:
-        print(res)
+        if res[0]=='[' and res[-1]==']':
+            res = res[1:-1]
+            temp_arr = [element.strip() for element in res.split(',')]
+            for num in range(len(temp_arr)):
+                print(temp_arr[num])
+    
+
         
