@@ -130,8 +130,8 @@ res = attempt_proof(question_1.variables, question_1.domain_description+", x <= 
 print(res)
 
 
-if __name__=="__main__":
-    prompt = """<code_editing_rules>
+def try_and_prove(question : question):
+    prompt = f"""<code_editing_rules>
   <guiding_principles>
     – Be precise, avoid conflicting instructions
     – Use natural subdomains so inequality proof is trivial
@@ -141,8 +141,8 @@ if __name__=="__main__":
   </guiding_principles>
 
   <task>
-    Given domain: x>0, y>1
-    Inequality: x*y <= y*Log[y] + Exp[x]
+    Given domain: {question.domain_description}
+    Inequality: {question.lhs} <= {question.rhs}
     Find minimal subdomains that make inequality trivial
   </task>
 
@@ -156,8 +156,10 @@ if __name__=="__main__":
         if res[0]=='[' and res[-1]==']':
             res = res[1:-1]
             temp_arr = [element.strip() for element in res.split(',')]
-            for num in range(len(temp_arr)):
-                print(temp_arr[num])
-    
-
+            if len(temp_arr)!=0:
+                for num in range(len(temp_arr)):
+                    print(attempt_proof(question.variables, question.domain_description+f", {temp_arr[num]}", question.lhs, question.rhs))
+        
+if __name__ == "__main__":
+    try_and_prove(question_1)
         
