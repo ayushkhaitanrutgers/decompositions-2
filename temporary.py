@@ -180,52 +180,52 @@ class series_to_bound:
 series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", summation_index="d", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
     
 
-def ask_llm_series(series: series_to_bound):
-    prompt = f"""<code_editing_rules>
-    <guiding_principles>
-        – Be precise; avoid conflicting or circular instructions.
-        – Choose “natural” breakpoint scales where the term behavior changes (e.g., dominance switches, monotonicity kicks in, easy comparison with p-series/geometric/integral bounds).
-        – Minimize the number of breakpoints while ensuring the final bound is straightforward on each subrange.
-        – Cover the full index range from 0 to Infinity, with nonoverlapping, contiguous subranges.
-        – If the index is integer-valued, return integer breakpoints using Floor[]/Ceiling[] when needed.
-        – Breakpoints may depend only on constants/parameters that appear in the series description.
-        – Use only Mathematica-parsable expressions for breakpoints, built from numbers, parameters, +, -, *, /, ^, Log[], Exp[], Sqrt[], Max[], Min[], Floor[], Ceiling[].
-        – Output only the breakpoint list; no extra words, symbols, or justification.
-    </guiding_principles>
+# def ask_llm_series(series: series_to_bound):
+#     prompt = f"""<code_editing_rules>
+#     <guiding_principles>
+#         – Be precise; avoid conflicting or circular instructions.
+#         – Choose “natural” breakpoint scales where the term behavior changes (e.g., dominance switches, monotonicity kicks in, easy comparison with p-series/geometric/integral bounds).
+#         – Minimize the number of breakpoints while ensuring the final bound is straightforward on each subrange.
+#         – Cover the full index range from 0 to Infinity, with nonoverlapping, contiguous subranges.
+#         – If the index is integer-valued, return integer breakpoints using Floor[]/Ceiling[] when needed.
+#         – Breakpoints may depend only on constants/parameters that appear in the series description.
+#         – Use only Mathematica-parsable expressions for breakpoints, built from numbers, parameters, +, -, *, /, ^, Log[], Exp[], Sqrt[], Max[], Min[], Floor[], Ceiling[].
+#         – Output only the breakpoint list; no extra words, symbols, or justification.
+#     </guiding_principles>
 
-    <task>
-        We are given a series described by:
-        • formula: {series.formula}
-        • summation index: {series.summation_index}
-        • summation_bounds: {series.summation_bounds}
-        • conjectured_upper_asymptotic_bound: {series.conjectured_upper_asymptotic_bound}
-        • Import definition to understand: Given two functions f and g, f << g means that there exists a positive constant C>0 such that f <= C*g everywhere in the domain
+#     <task>
+#         We are given a series described by:
+#         • formula: {series.formula}
+#         • summation index: {series.summation_index}
+#         • summation_bounds: {series.summation_bounds}
+#         • conjectured_upper_asymptotic_bound: {series.conjectured_upper_asymptotic_bound}
+#         • Import definition to understand: Given two functions f and g, f << g means that there exists a positive constant C>0 such that f <= C*g everywhere in the domain
         
 
-        Goal: Return a minimal list of breakpoints [0, d_1, …, d_n, Infinity] such that proving
-        Sum[formula, summation_bounds restricted to each consecutive subrange]
-        << conjectured_upper_asymptotic_bound
-        is trivial on every subrange (e.g., via a simple termwise bound, a direct comparison to a standard convergent series, or the integral test with monotonicity).
-    </task>
+#         Goal: Return a minimal list of breakpoints [0, d_1, …, d_n, Infinity] such that proving
+#         Sum[formula, summation_bounds restricted to each consecutive subrange]
+#         << conjectured_upper_asymptotic_bound
+#         is trivial on every subrange (e.g., via a simple termwise bound, a direct comparison to a standard convergent series, or the integral test with monotonicity).
+#     </task>
 
-    <requirements_for_breakpoints>
-        – Start at 0 and end at Infinity.
-        – Strictly nondecreasing: 0 <= d_1 <= … <= d_n < Infinity.
-        – Each d_i must be a closed-form Mathematica expression in the series’ parameters (if any), using only the allowed constructors above.
-        – Prefer canonical scales (e.g., powers/roots of parameters, thresholds defined by equating dominant terms) that make comparisons immediate.
-        – Keep the list as short as possible while preserving triviality of the bound on each subrange.
-    </requirements_for_breakpoints>
+#     <requirements_for_breakpoints>
+#         – Start at 0 and end at Infinity.
+#         – Strictly nondecreasing: 0 <= d_1 <= … <= d_n < Infinity.
+#         – Each d_i must be a closed-form Mathematica expression in the series’ parameters (if any), using only the allowed constructors above.
+#         – Prefer canonical scales (e.g., powers/roots of parameters, thresholds defined by equating dominant terms) that make comparisons immediate.
+#         – Keep the list as short as possible while preserving triviality of the bound on each subrange.
+#     </requirements_for_breakpoints>
 
-    <output_format>
-        [0, d1, d2, ..., Infinity]
-        # Return exactly one Mathematica list literal with the breakpoints only.
-    </output_format>
-    </code_editing_rules>
-    """
-    print(api_call_series(prompt=prompt))
+#     <output_format>
+#         [0, d1, d2, ..., Infinity]
+#         # Return a list with the breakpoints only.
+#     </output_format>
+#     </code_editing_rules>
+#     """
+#     print(api_call_series(prompt=prompt))
     
-if __name__ == "__main__":
-    ask_llm_series(series_1)
+# if __name__ == "__main__":
+#     ask_llm_series(series_1)
 
     
 

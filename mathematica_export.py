@@ -1,6 +1,6 @@
 import subprocess, shlex, os, shutil, json
-from typing import Any
-from llm_client import api_call
+from typing import Any, List
+from llm_client import api_call, api_call_series
 from dataclasses import dataclass
 import re
 
@@ -130,42 +130,102 @@ question_2 = question(variables = "x,y,z", domain_description = "x>0, y>0, z>0",
 # print(res)
 
 
-def try_and_prove(question : question):
-    prompt = f"""<code_editing_rules>
-  <guiding_principles>
-    – Be precise, avoid conflicting instructions
-    – Use natural subdomains so inequality proof is trivial
-    – Minimize the number of subdomains
-    – Output only subdomains, no extra words or symbols
-    – Use only <=, >=, <, >, Log[], Exp[] in the output. 
-    Only use Mathematical notation that the software Mathematica can parse
-  </guiding_principles>
+# def try_and_prove(question : question):
+#     prompt = f"""<code_editing_rules>
+#   <guiding_principles>
+#     – Be precise, avoid conflicting instructions
+#     – Use natural subdomains so inequality proof is trivial
+#     – Minimize the number of subdomains
+#     – Output only subdomains, no extra words or symbols
+#     – Use only <=, >=, <, >, Log[], Exp[] in the output. 
+#     Only use Mathematical notation that the software Mathematica can parse
+#   </guiding_principles>
 
-  <task>
-    Given domain: {question.domain_description}
-    Inequality: {question.lhs} <= {question.rhs}
-    Find minimal subdomains that make proving the inequality/asymptotic estimate trivial.
-    The union of these subdomains should be the whole domain.
-  </task>
+#   <task>
+#     Given domain: {question.domain_description}
+#     Inequality: {question.lhs} <= {question.rhs}
+#     Find minimal subdomains that make proving the inequality/asymptotic estimate trivial.
+#     The union of these subdomains should be the whole domain.
+#   </task>
 
-  <output_format>
-    [{' && '.join([p.strip() for p in question.domain_description.split(',')])} && subdomain1, {' && '.join([p.strip() for p in question.domain_description.split(',')])} && subdomain2, ...]. Hence, your output should in the form of an array
-  </output_format>
-</code_editing_rules>
-"""
-    res = api_call(prompt=prompt)
-    if res:
-        if res[0]=='[' and res[-1]==']':
-            res = res[1:-1]
-            print(res)
-            temp_arr = [element.strip() for element in res.split(',')]
-            if len(temp_arr)!=0:
-                count = 0
-                for num in range(len(temp_arr)):
-                    print(f"""The proof attempt in {temp_arr[num]} : {attempt_proof(question.variables, question.domain_description+f', {temp_arr[num]}', question.lhs, question.rhs)}""")
-                    count+=1
-                if count == len(temp_arr):
-                    print('Proved everywhere')
+#   <output_format>
+#     [{' && '.join([p.strip() for p in question.domain_description.split(',')])} && subdomain1, {' && '.join([p.strip() for p in question.domain_description.split(',')])} && subdomain2, ...]. Hence, your output should in the form of an array
+#   </output_format>
+# </code_editing_rules>
+# """
+#     res = api_call(prompt=prompt)
+#     if res:
+#         if res[0]=='[' and res[-1]==']':
+#             res = res[1:-1]
+#             print(res)
+#             temp_arr = [element.strip() for element in res.split(',')]
+#             if len(temp_arr)!=0:
+#                 count = 0
+#                 for num in range(len(temp_arr)):
+#                     print(f"""The proof attempt in {temp_arr[num]} : {attempt_proof(question.variables, question.domain_description+f', {temp_arr[num]}', question.lhs, question.rhs)}""")
+#                     count+=1
+#                 if count == len(temp_arr):
+#                     print('Proved everywhere')
         
+
+#################### We now try and prove that series can also be solved. We first need to make an API call. 
+
+@dataclass
+class series_to_bound:
+    formula : str
+    summation_index: str
+    summation_bounds: List[str]
+    conjectured_upper_asymptotic_bound: str
+    
+series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", summation_index="d", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
+    
+
+def ask_llm_series(series: series_to_bound):
+    prompt = f"""<code_editing_rules>
+    <guiding_principles>
+        – Be precise; avoid conflicting or circular instructions.
+        – Choose “natural” breakpoint scales where the term behavior changes (e.g., dominance switches, monotonicity kicks in, easy comparison with p-series/geometric/integral bounds).
+        – Minimize the number of breakpoints while ensuring the final bound is straightforward on each subrange.
+        – Cover the full index range from 0 to Infinity, with nonoverlapping, contiguous subranges.
+        – If the index is integer-valued, return integer breakpoints using Floor[]/Ceiling[] when needed.
+        – Breakpoints may depend only on constants/parameters that appear in the series description.
+        – Use only Mathematica-parsable expressions for breakpoints, built from numbers, parameters, +, -, *, /, ^, Log[], Exp[], Sqrt[], Max[], Min[], Floor[], Ceiling[].
+        – Output only the breakpoint list; no extra words, symbols, or justification.
+    </guiding_principles>
+
+    <task>
+        We are given a series described by:
+        • formula: {series.formula}
+        • summation index: {series.summation_index}
+        • summation_bounds: {series.summation_bounds}
+        • conjectured_upper_asymptotic_bound: {series.conjectured_upper_asymptotic_bound}
+        • Import definition to understand: Given two functions f and g, f << g means that there exists a positive constant C>0 such that f <= C*g everywhere in the domain
+        
+
+        Goal: Return a minimal list of breakpoints [0, d_1, …, d_n, Infinity] such that proving
+        Sum[formula, summation_bounds restricted to each consecutive subrange]
+        << conjectured_upper_asymptotic_bound
+        is trivial on every subrange (e.g., via a simple termwise bound, a direct comparison to a standard convergent series, or the integral test with monotonicity).
+    </task>
+
+    <requirements_for_breakpoints>
+        – Start at 0 and end at Infinity.
+        – Strictly nondecreasing: 0 <= d_1 <= … <= d_n < Infinity.
+        – Each d_i must be a closed-form expression in the series parameters (if any), using only the allowed constructors above.
+        – Prefer canonical scales (e.g., powers/roots of parameters, thresholds defined by equating dominant terms) that make comparisons immediate.
+        – Keep the list as short as possible while preserving triviality of the bound on each subrange.
+    </requirements_for_breakpoints>
+
+    <output_format>
+        [0, d1, d2, ..., Infinity]
+        # Return a list with the breakpoints only.
+    </output_format>
+    </code_editing_rules>
+    """
+    print(api_call_series(prompt=prompt))
+    
 if __name__ == "__main__":
-    try_and_prove(question_1)
+    ask_llm_series(series_1)
+
+    
+
