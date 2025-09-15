@@ -190,6 +190,12 @@ def api_call(*, prompt: str, parse: bool = False, coerce_numbers: bool = False):
     if not parse:
         return final_value
     return _parse_bracketed_list(final_value, coerce_numbers=coerce_numbers)
+
+def api_call_series(*, prompt: str):
+    stream = stream_text(prompt)
+        # Join streamed chunks without inserting extra spaces; normalize whitespace.
+    b = ''.join(a for a in stream).strip()
+    return b
     
 if __name__=="__main__":
 #     prompt = """Consider the domain x>0 and y>1. Then it is true that xy<= ylog[y]+exp[x]. However, this may be tricky to prove.
