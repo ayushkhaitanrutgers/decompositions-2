@@ -280,8 +280,59 @@ def ask_llm_series(series: series_to_bound):
     
 series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", conditions = "h >1 && m > 1", summation_index="d", other_variables="{h,m}", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
 
+# --- CLI entrypoint ---
+def main() -> None:
+    import argparse
+    import inspect
+
+    parser = argparse.ArgumentParser(
+        prog="decomp",
+        description="Run LLM-guided series decomposition and CAS verification",
+    )
+    parser.add_argument(
+        "example",
+        nargs="?",
+        help="Name of the example object from examples.py (e.g., series_1)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List available examples and exit",
+    )
+    args = parser.parse_args()
+
+    try:
+        import examples  # your examples live here
+    except Exception as e:
+        raise SystemExit(f"Failed to import examples.py: {e}")
+
+    # Collect public attributes that are instances of series_to_bound
+    available = {
+        name: obj
+        for name, obj in vars(examples).items()
+        if not name.startswith("_") and isinstance(obj, series_to_bound)
+    }
+
+    if args.list or not args.example:
+        if not available:
+            print("No examples found in examples.py")
+            return
+        print("Available examples:")
+        for name in sorted(available):
+            print(f"  - {name}")
+        return
+
+    obj = available.get(args.example)
+    if obj is None:
+        close = ", ".join(sorted(available)) or "<none>"
+        raise SystemExit(f"Unknown example '{args.example}'. Choose one of: {close}")
+
+    ask_llm_series(obj)
+
+
 if __name__ == "__main__":
-    ask_llm_series(series_1)
+    main()
+
 
 
 

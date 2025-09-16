@@ -1,0 +1,17 @@
+README.md
+axioms.py
+cli.py
+entry.py
+examples.py
+llm_client.py
+math_functions.py
+mathematica_export.py
+pyproject.toml
+series_summation.py
+shared.py
+decompositions_project.egg-info/PKG-INFO
+decompositions_project.egg-info/SOURCES.txt
+decompositions_project.egg-info/dependency_links.txt
+decompositions_project.egg-info/entry_points.txt
+decompositions_project.egg-info/requires.txt
+decompositions_project.egg-info/top_level.txt

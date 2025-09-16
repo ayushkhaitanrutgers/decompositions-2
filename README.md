@@ -42,5 +42,15 @@ export WOLFRAMSCRIPT=/usr/local/bin/wolframscript  # example
 python mathematica_export.py
 ```
 
+## CLI
+You can now add the questions you want to prove in the examples.py file, and then attempt to prove them by running
+```bash
+decomp prove question_<question number here>
+```
+or 
+```
+decomp series series_<series number here>
+```
+
 This invokes the flow that queries the LLM for subdomains and verifies them with Mathematica. The script prints a status such as `It is proved` when the CAS verifies the inequality under the proposed decomposition.
 

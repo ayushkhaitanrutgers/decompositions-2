@@ -1,0 +1,9 @@
+axioms
+cli
+entry
+examples
+llm_client
+math_functions
+mathematica_export
+series_summation
+shared

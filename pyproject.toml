@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "decompositions-project"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+  "google-genai>=0.3.0",
+  "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+decomp = "cli:main"
+
+[tool.setuptools]
+py-modules = [
+  "cli",
+  "examples",
+  "series_summation",
+  "mathematica_export",
+  "llm_client",
+  "shared",
+  "axioms",
+  "math_functions",
+  "entry",
+]
