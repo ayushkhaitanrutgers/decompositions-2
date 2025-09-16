@@ -1,7 +1,0 @@
-(set-logic NRA)
-(declare-fun C () Real)
-(assert (= C 2))
-; Try to find a counterexample: a <= b but a > C*(b/2)
-(assert (exists ((a Real) (b Real)) 
-  (and (<= a b) (> a (* C (/ b 2))))))
-(check-sat)

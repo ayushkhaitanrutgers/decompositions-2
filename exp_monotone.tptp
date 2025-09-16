@@ -1,9 +1,0 @@
-% Prove: forall A,B. exp(A) <= exp(B) => A <= B
-fof(exp_monotone, conjecture,
-    ! [A,B] : ( exp(A) <= exp(B) => A <= B )
-).
-
-% You only need general real-arithmetic helpers and exp bounds.
-include('Axioms/general.ax').
-include('Axioms/exp-upper.ax').
-include('Axioms/exp-lower.ax').

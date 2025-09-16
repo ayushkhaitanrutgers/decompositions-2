@@ -1,5 +1,0 @@
-(set-logic NRAT)
-(declare-fun A () Real)
-(declare-fun B () Real)
-(assert (and (< (exp A) (exp B)) (not (<= A B))))
-(check-sat)

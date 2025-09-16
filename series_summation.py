@@ -114,7 +114,7 @@ class series_to_bound:
     summation_bounds: List[str]
     conjectured_upper_asymptotic_bound: str
     
-series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", conditions = "h >1 && m > 1", summation_index="d", other_variables="{h,m}", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
+
     
 
 def ask_llm_series(series: series_to_bound):
@@ -276,8 +276,10 @@ def ask_llm_series(series: series_to_bound):
             count+=1
             print('Not verified')
     if count ==5:
-        print('Try prompting the LLM again. Tge verification has failed up to a positive constant C = 10^4')
+        print('Try prompting the LLM again. The verification has failed up to a positive constant C = 10^4')
     
+series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", conditions = "h >1 && m > 1", summation_index="d", other_variables="{h,m}", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
+
 if __name__ == "__main__":
     ask_llm_series(series_1)
 
