@@ -26,8 +26,12 @@ def _resolve_wolframscript() -> str:
     if which_path:
         return which_path
 
-    # Common install locations
-    for p in ("/usr/local/bin/wolframscript", "/opt/homebrew/bin/wolframscript"):
+    # Common install locations (include default Wolfram.app path on macOS)
+    for p in (
+        "/Applications/Wolfram.app/Contents/MacOS/WolframScript",
+        "/usr/local/bin/wolframscript",
+        "/opt/homebrew/bin/wolframscript",
+    ):
         if os.path.isfile(p) and os.access(p, os.X_OK):
             return p
 
@@ -139,7 +143,7 @@ def ask_llm_series(series: series_to_bound):
         • Import definition to understand: Given two functions f and g, f << g means that there exists a positive constant C>0 such that f <= C*g everywhere in the domain
         
 
-        Goal: Return a minimal list of breakpoints [0, d_1, …, d_n, Infinity] such that proving
+        Goal: Return a minimal list of breakpoints [{series.summation_bounds[0]}, d_1, …, d_n, {series.summation_bounds[1]}] such that proving
         Sum[formula, summation_bounds restricted to each consecutive subrange]
         << conjectured_upper_asymptotic_bound
         is trivial on every subrange (e.g., via a simple termwise bound, a direct comparison to a standard convergent series, or the integral test with monotonicity).
@@ -154,7 +158,7 @@ def ask_llm_series(series: series_to_bound):
     </requirements_for_breakpoints>
 
     <output_format>
-        [0, d1, d2, ..., Infinity]
+        [{series.summation_bounds[0]}, d1, d2, ..., {series.summation_bounds[1]}]
         # Return a list with the breakpoints only.
     </output_format>
     </code_editing_rules>
@@ -332,7 +336,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 

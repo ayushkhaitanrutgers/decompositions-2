@@ -2,7 +2,7 @@ import os
 import argparse
 
 from series_summation import series_to_bound, ask_llm_series
-from mathematica_export import question, try_and_prove
+from mathematica_export import inequality, try_and_prove
 
 def _load_examples():
     try:
@@ -18,7 +18,7 @@ def _load_examples():
     questions = {
         name: obj
         for name, obj in vars(examples).items()
-        if not name.startswith("_") and isinstance(obj, question)
+        if not name.startswith("_") and isinstance(obj, inequality)
     }
     return series, questions
 
@@ -40,7 +40,7 @@ def main() -> None:
     p_series.add_argument("name", help="Example name in examples.py (e.g., series_1)")
     # Prove
     p_prove = sub.add_parser("prove", help="Run an inequality proof example")
-    p_prove.add_argument("name", help="Question name in examples.py (e.g., question_1)")
+    p_prove.add_argument("name", help="Inequality name in examples.py (e.g., inequality_1)")
 
     args = parser.parse_args()
 
@@ -72,7 +72,7 @@ def main() -> None:
         obj = question_map.get(args.name)
         if obj is None:
             choices = ", ".join(sorted(question_map)) or "<none>"
-            raise SystemExit(f"Unknown question '{args.name}'. Choose one of: {choices}")
+            raise SystemExit(f"Unknown inequality '{args.name}'. Choose one of: {choices}")
         try_and_prove(obj)
         return
 

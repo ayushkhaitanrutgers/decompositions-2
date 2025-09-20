@@ -1,5 +1,5 @@
 from series_summation import series_to_bound
-from mathematica_export import question
+from mathematica_export import inequality
 
 # Define your example series objects here. Add more as needed.
 series_1 = series_to_bound(
@@ -11,25 +11,44 @@ series_1 = series_to_bound(
     conjectured_upper_asymptotic_bound="1+Log[m^2]",
 )
 
+series_2 = series_to_bound(
+    formula="""2^(((d/p) + 1 - a)*j)*
+ Integrate[exp (-2^(j)*s)*s^a/(1 + s^(2*a)), {s, 0, Infinity}]""",
+    conditions="d>1 && p>1 && a>d/p",
+    summation_index="j",
+    other_variables="{a,d,p}",
+    summation_bounds=["-Infinity", "Infinity"],
+    conjectured_upper_asymptotic_bound="1",
+)
 
 
-question_1 = question(
+
+
+inequality_1 = inequality(
     variables="{x,y}",
     domain_description="{x>0, y>1}",
     lhs="x*y",
     rhs="y*Log[y]+Exp[x]",
 )
 
-question_2 = question(
+inequality_2 = inequality(
     variables = "x,y,z", 
     domain_description = "x>0, y>0, z>0", 
     lhs = "(x*y*z)^(1/3)", 
     rhs = "(x+y+z)/3"
     )
 
-question_3 = question(
+inequality_3 = inequality(
     variables = "x,y,z", 
     domain_description = "x>0, y>0", 
     lhs = "(x*y)^(1/2)", 
     rhs = "(x+y)/2"
     )
+
+inequality_4 = inequality(
+    variables = "x", 
+    domain_description = "x>1", 
+    lhs = "x^2", 
+    rhs = "x"
+    )
+#Should return False. 

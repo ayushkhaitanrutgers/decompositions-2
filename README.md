@@ -1,11 +1,11 @@
 # Decompositions Project
 
-This is joint work with [Dr. Vijay Ganesh](https://www.cc.gatech.edu/people/vijay-ganesh). 
+This is joint work with [Dr. Vijay Ganesh](https://www.cc.gatech.edu/people/vijay-ganesh). We gratefully acknowledge the help of numerous students and professors who have discussed this idea with us. These include Swarat Chaudhuri, Aiman Koli and 
 
-This project fully solves a question asked by Terry Tao [here](https://terrytao.wordpress.com/2025/05/01/a-proof-of-concept-tool-to-verify-estimates/#n2) and [here](https://mathoverflow.net/questions/463937/what-mathematical-problems-can-be-attacked-using-deepminds-recent-mathematical/463940#463940). 
+This project answers a question posed by Terry Tao [here](https://terrytao.wordpress.com/2025/05/01/a-proof-of-concept-tool-to-verify-estimates/#n2) and [here](https://mathoverflow.net/questions/463937/what-mathematical-problems-can-be-attacked-using-deepminds-recent-mathematical/463940#463940). 
 
 >[!NOTE]
->Given two functions $f$ and $g$ defined on a domain $\mathcal{D}$, the notation $f\ll g$ implies that there exists a positive constant $C>0$ such that $$f \leq >C*g$$ at every point in $\mathcal{D}$. Assuming that the functions don't blow up at any point in $D$, this is equivalent to $f = O(g)$. 
+>Given two functions $f$ and $g$ defined on a domain $\mathcal{D}$, the notation $f\ll g$ implies that there exists a positive constant $C>0$ such that $$f \leq C*g$$ at every point in $\mathcal{D}$. Assuming that the functions don't blow up at any point in $D$, this is equivalent to $f = O(g)$. 
 
 Inspired by Google DeepMind's [alphageometry](https://github.com/google-deepmind/alphageometry), this repository explores using an LLM to propose natural subdomain decompositions where proving these estimates is much simpler, and then using a Computer Algebra System to verify that these estimates are indeed true in each of these subdomains. 
 
@@ -45,10 +45,10 @@ python mathematica_export.py
 ## CLI
 You can now add the questions you want to prove in the examples.py file, and then attempt to prove them by running
 ```bash
-decomp prove question_<question number here>
+decomp prove inequality_<inequality number here>
 ```
 or 
-```
+```bash
 decomp series series_<series number here>
 ```
 
