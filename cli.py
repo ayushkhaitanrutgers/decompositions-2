@@ -41,6 +41,9 @@ def main() -> None:
     # Prove
     p_prove = sub.add_parser("prove", help="Run an inequality proof example")
     p_prove.add_argument("name", help="Inequality name in examples.py (e.g., inequality_1)")
+    # Solve (alias for prove)
+    p_solve = sub.add_parser("solve", help="Alias of 'prove' for inequalities")
+    p_solve.add_argument("name", help="Inequality name in examples.py (e.g., inequality_1)")
 
     args = parser.parse_args()
 
@@ -68,7 +71,7 @@ def main() -> None:
         ask_llm_series(obj)
         return
 
-    if args.cmd == "prove":
+    if args.cmd in ("prove", "solve"):
         obj = question_map.get(args.name)
         if obj is None:
             choices = ", ".join(sorted(question_map)) or "<none>"

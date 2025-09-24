@@ -67,65 +67,38 @@ def wl_bool(expr: str) -> bool:
 
 #The following is to separate the executables
 def attempt_proof(vars, conds, lhs, rhs):
-    # Try a modest constant factor c = 0 only (as before)
+    def _normalize_wl(s: str) -> str:
+        return (s.replace('exp[','Exp[')
+                 .replace('log[','Log[')
+                 .replace('ln[','Log['))
 
-    for c in range(5):
-        status = False
-        # Normalize WL heads without changing math content
-        lhs_wl = lhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
-        rhs_wl = rhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
+    lhs_wl = _normalize_wl(lhs)
+    rhs_wl = _normalize_wl(rhs)
 
-        # Normalize variables and conditions into single-braced WL lists
-        vars_text = vars.strip()
-        if vars_text.startswith('{') and vars_text.endswith('}'):
-            vars_text = vars_text[1:-1]
-        vars_code = '{' + vars_text + '}' if vars_text else '{}'
-        print(vars_code)
+    vars_text = vars.strip()
+    if vars_text.startswith('{') and vars_text.endswith('}'):
+        vars_text = vars_text[1:-1]
+    vars_code = '{' + vars_text + '}' if vars_text else '{}'
 
-        conds_code = conds.strip()
+    conds_code = conds.strip()
+    if not (conds_code.startswith('{') and conds_code.endswith('}')):
+        conds_code = '{' + conds_code + '}' if conds_code else '{}'
+    conds_code = _normalize_wl(conds_code)
 
-        # Ensure exactly one level of braces around conditions
-        if not (conds_code.startswith('{') and conds_code.endswith('}')):
-            conds_code = '{' + conds_code + '}' if conds_code else '{}'
+    # Try a range of constants (C = 10^c)
+    for c in range(-2, 7):
+        a = wl_eval(f"""
+witnessBigO[vars_, conds_, lhs_, rhs_, c_] :=
+  Module[{{S}},
+    S = If[conds === {{}}, True, And @@ conds];
+    Resolve[ForAll[vars, Implies[S, lhs <= 10^c*rhs]], Reals]
+  ];
+witnessBigO[{vars_code}, {conds_code}, {lhs_wl}, {rhs_wl}, {c}]
+        """)
+        if a == 'True':  return f'It is proved with C=10^{c}'
+        if a == 'False': return 'This is False'
+    return 'Status unknown. Try a different setup'
 
-        a = wl_eval(
-            f"""
-Clear[witnessBigO, witnessBigOAnyOrder, witnessBigOAnyOrderFast];
-
-(*Your original predicate (use System`Resolve to avoid any shadowing)*)
-witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
-  Module[{{S = And @@ conds}}, 
-   System`Resolve[ForAll[vars, Implies[S, lhs <= 10^c*rhs]], Reals]];
-
-(*Simple:try every permutation and return True if any run yields True*)
-witnessBigOAnyOrder[vars_, conds_, lhs_, rhs_, c_] := 
-  AnyTrue[Permutations[vars], 
-   TrueQ@witnessBigO[#, conds, lhs, rhs, c] &];
-
-(*Fast short-circuiting variant*)
-witnessBigOAnyOrderFast[vars_, conds_, lhs_, rhs_, c_] := 
-  Catch[Scan[
-    Function[v, 
-     If[TrueQ@witnessBigO[v, conds, lhs, rhs, c], 
-      Throw[True]  (*stop as soon as one order works*)]], 
-    Permutations[vars]];
-   False];
-witnessBigOAnyOrder[{vars_code}, {conds_code}, {lhs_wl}, {rhs_wl}, {c}]
-
-
-            """
-        )
-        if a == 'True':
-            status = True
-            print('hululu')
-            return 'It is proved'
-        elif a == 'False':
-            status = True
-            return 'This is False'
-        else:
-            continue
-    if status is False:
-        return 'Status unknown. Try a different setup'
         
 
 # prompt = """I want to prove that in the domain x>0 and y>1, we have that x*y <= y*log[y]+Exp[x].
@@ -231,4 +204,3 @@ if __name__ == "__main__":
     try_and_prove(inequality_1)
 
     
-#witnessBigO[{vars_code}, {conds_code}, {lhs_wl}, {rhs_wl}, {c}]

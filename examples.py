@@ -12,23 +12,36 @@ series_1 = series_to_bound(
 )
 
 series_2 = series_to_bound(
-    formula="""2^(((d/p) + 1 - a)*j)*
- Integrate[exp (-2^(j)*s)*s^a/(1 + s^(2*a)), {s, 0, Infinity}]""",
-    conditions="d>1 && p>1 && a>d/p",
-    summation_index="j",
-    other_variables="{a,d,p}",
-    summation_bounds=["-Infinity", "Infinity"],
+    formula="a/d^2",
+    conditions="a>1 && d>1",
+    summation_index="d",
+    other_variables="{a}",
+    summation_bounds=["1", "Infinity"],
+    conjectured_upper_asymptotic_bound="a",
+)
+
+series_3 = series_to_bound(
+    formula="1/d",
+    conditions="True",
+    summation_index="d",
+    other_variables="True",
+    summation_bounds=["1", "Infinity"],
     conjectured_upper_asymptotic_bound="1",
 )
 
 
 
 
+
+
+
+
+
 inequality_1 = inequality(
     variables="{x,y}",
-    domain_description="{x>0, y>1}",
+    domain_description="{y>0, x>1}",
     lhs="x*y",
-    rhs="y*Log[y]+Exp[x]",
+    rhs="x*Log[x]+Exp[y]",
 )
 
 inequality_2 = inequality(

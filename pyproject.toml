@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 decomp = "cli:main"
+decomp-web = "webapp:main"
 
 [tool.setuptools]
 py-modules = [
@@ -25,4 +26,6 @@ py-modules = [
   "axioms",
   "math_functions",
   "entry",
+  "experiments",
+  "webapp",
 ]

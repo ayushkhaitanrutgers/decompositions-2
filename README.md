@@ -1,7 +1,5 @@
 # Decompositions Project
 
-This is joint work with [Dr. Vijay Ganesh](https://www.cc.gatech.edu/people/vijay-ganesh). We gratefully acknowledge the help of numerous students and professors who have discussed this idea with us. These include Swarat Chaudhuri, Aiman Koli and 
-
 This project answers a question posed by Terry Tao [here](https://terrytao.wordpress.com/2025/05/01/a-proof-of-concept-tool-to-verify-estimates/#n2) and [here](https://mathoverflow.net/questions/463937/what-mathematical-problems-can-be-attacked-using-deepminds-recent-mathematical/463940#463940). 
 
 >[!NOTE]
@@ -53,4 +51,6 @@ decomp series series_<series number here>
 ```
 
 This invokes the flow that queries the LLM for subdomains and verifies them with Mathematica. The script prints a status such as `It is proved` when the CAS verifies the inequality under the proposed decomposition.
+
+Now there is also a website where you can put in a latex input, and you get as an output the suggest decompositions, and the result of Mathematica's attempt at proving the estimate. This website is o-forge.com
 

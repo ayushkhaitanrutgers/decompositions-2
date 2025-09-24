@@ -171,105 +171,120 @@ def ask_llm_series(series: series_to_bound):
     count=0
     
     for c in range(5):
+        ante_code = "True" if getattr(series, "conditions", "") == "" else series.conditions
+        vars_text = "True" if getattr(series, "other_variables", "") == "" else series.other_variables
 
+        if vars_text.startswith("{") and vars_text.endswith("}"):
+            vars_text = vars_text[1:-1].strip()
         a = wl_eval (f"""
-        Clear[LeadingSummand, DominancePiecewise, LeastSummand, \
-        AntiDominancePiecewise,
-            expandPowersInProductNoNumbers, reducedForm, createAssums, \
-        calculateEstimates];
+        Clear[LeadingSummand, DominancePiecewise, LeastSummand, 
+        AntiDominancePiecewise, expandPowersInProductNoNumbers, reducedForm,
+        createAssums, calculateEstimates, expr, baseAssums];
 
-        LeadingSummand[sum_, assum_] := Module[{{terms, vars, dominatesQ, \
-        winners}},
+        (* Logging helpers: write to stderr so Python stdout stays clean *)
+        log[s_String] := WriteString["stderr", s<>"\n"];
+        logForm[label_String, expr_] := WriteString["stderr", label<>": "<>ToString[expr, InputForm]<>"\n"];
+
+        Needs["PacletManager`"];
+        PacletUninstall["UnitTable"];         
+        PacletInstall["UnitTable"];           
+
+
+        LeadingSummand[sum_, assum_] := 
+        Module[{{terms, vars, dominatesQ, winners}}, 
         terms = DeleteCases[List @@ Expand[sum], 0];
-        If[!ListQ[terms], terms = {{terms}}];
+        If[! ListQ[terms], terms = {{terms}}];
         If[terms === {{}}, Return[0]];
         If[Length[terms] == 1, Return[First[terms]]];
         vars = Variables[{{sum, assum}}];
-        dominatesQ[t_] := Resolve[
-            ForAll[vars, Implies[assum, And @@ Thread[t >= DeleteCases[terms, \
-        t, 1, 1]]]],
-            Reals
-        ];
-        winners = Select[terms, TrueQ @ dominatesQ[#] &];
-        Which[winners =!= {{}}, First[winners],
-                True, Simplify[DominancePiecewise[terms, assum, vars], \
-        assum]]
-        ];
+        dominatesQ[t_] := 
+            Resolve[ForAll[vars, 
+            Implies[assum, And @@ Thread[t >= DeleteCases[terms, t, 1, 1]]]],
+            Reals];
+        winners = Select[terms, TrueQ@dominatesQ[#] &];
+        Which[winners =!= {{}}, First[winners], True, 
+            Simplify[DominancePiecewise[terms, assum, vars], assum]]];
 
-        DominancePiecewise[terms_, assum_, vars_] := Module[{{conds}},
+        DominancePiecewise[terms_, assum_, vars_] := 
+        Module[{{conds}}, 
         conds = Table[
-            Reduce[assum && And @@ Thread[ti >= DeleteCases[terms, ti, 1, \
-        1]], vars, Reals],
-            {{ti, terms}}
-        ];
-        Piecewise[Transpose[{{terms, conds}}]]
-        ];
+            Reduce[assum && And @@ Thread[ti >= DeleteCases[terms, ti, 1, 1]],
+            vars, Reals], {{ti, terms}}];
+        Piecewise[Transpose[{{terms, conds}}]]];
 
-        LeastSummand[sum_, assum_] := Module[{{terms, vars, leastQ, winners}},
+        LeastSummand[sum_, assum_] := 
+        Module[{{terms, vars, leastQ, winners}}, 
         terms = DeleteCases[List @@ Expand[sum], 0];
-        If[!ListQ[terms], terms = {{terms}}];
+        If[! ListQ[terms], terms = {{terms}}];
         If[terms === {{}}, Return[0]];
         If[Length[terms] == 1, Return[First[terms]]];
         vars = Variables[{{sum, assum}}];
-        leastQ[t_] := Resolve[
-            ForAll[vars, Implies[assum, And @@ Thread[t <= DeleteCases[terms, \
-        t, 1, 1]]]],
-            Reals
-        ];
-        winners = Select[terms, TrueQ @ leastQ[#] &];
-        Which[winners =!= {{}}, First[winners],
-                True, Simplify[AntiDominancePiecewise[terms, assum, vars], \
-        assum]]
-        ];
+        leastQ[t_] := 
+            Resolve[ForAll[vars, 
+            Implies[assum, And @@ Thread[t <= DeleteCases[terms, t, 1, 1]]]],
+            Reals];
+        winners = Select[terms, TrueQ@leastQ[#] &];
+        Which[winners =!= {{}}, First[winners], True, 
+            Simplify[AntiDominancePiecewise[terms, assum, vars], assum]]];
 
-        AntiDominancePiecewise[terms_, assum_, vars_] := Module[{{conds}},
+        AntiDominancePiecewise[terms_, assum_, vars_] := 
+        Module[{{conds}}, 
         conds = Table[
-            Reduce[assum && And @@ Thread[ti <= DeleteCases[terms, ti, 1, \
-        1]], vars, Reals],
-            {{ti, terms}}
-        ];
-        Piecewise[Transpose[{{terms, conds}}]]
-        ];
+            Reduce[assum && And @@ Thread[ti <= DeleteCases[terms, ti, 1, 1]],
+            vars, Reals], {{ti, terms}}];
+        Piecewise[Transpose[{{terms, conds}}]]];
 
-        expandPowersInProductNoNumbers[expr_] :=
-        Select[
-            Replace[List @@ expr,
-            Power[base_, n_Integer?Positive] :> Sequence @@ \
-        ConstantArray[base, n],
-            {{1}}
-            ],
-            Not[NumericQ[#]] &
-        ];
+        (*robust factor extractor:always returns a list of non-\
+        numeric factors*)
+        expandPowersInProductNoNumbers[expr_] := 
+        Module[{{factors}}, 
+        factors = If[Head[expr] === Times, List @@ expr, {{expr}}];
+        factors = 
+            factors /. 
+            Power[base_, n_Integer?Positive] :> ConstantArray[base, n];
+        factors = Flatten[factors];
+        Select[factors, Not@*NumericQ]];
 
-        reducedForm[expr_, assum_] := Module[{{numr, denr, simpn, simpd}},
-        numr = expandPowersInProductNoNumbers @ Numerator @ Simplify[expr, \
-        Assumptions -> assum];
-        denr = expandPowersInProductNoNumbers @ Denominator @ \
-        Simplify[expr, Assumptions -> assum];
+
+        reducedFormIndexed[expr_, assum_, idx_] := 
+        Module[{{numr, denr, simpn, simpd}}, 
+        numr = expandPowersInProductNoNumbers@
+            Numerator@Simplify[expr, Assumptions -> assum];
+        denr = 
+            expandPowersInProductNoNumbers@
+            Denominator@Simplify[expr, Assumptions -> assum];
         simpn = Times @@ (LeadingSummand[#, assum] & /@ numr);
         simpd = Times @@ (LeadingSummand[#, assum] & /@ denr);
-        Simplify[simpn/simpd, Assumptions -> assum]
-        ];
+        logForm["  Numerator factors", numr];
+        logForm["  Denominator factors", denr];
+        logForm["  Leading term in numerator in subdomain_"<>ToString[idx], simpn];
+        logForm["  Leading term in denominator in subdomain_"<>ToString[idx], simpd];
+        Simplify[simpn/simpd, Assumptions -> assum]];
 
-        createAssums[baseAssums_, points_] := Module[{{p}},
-        p = Partition[points, 2, 1];
-        baseAssums && d > #[[1]] && d < #[[2]] & /@ p
-        ];
+        createAssums[baseAssums_, points_] := 
+        Module[{{p}}, p = Partition[points, 2, 1];
+        baseAssums && d > #[[1]] && d < #[[2]] & /@ p];
 
-        calculateEstimates[expr_, baseAssums_, points_] := Module[{{assums, \
-        part}},
-        assums = createAssums[baseAssums, points];
-        part   = Prepend[#, d] & /@ Partition[points, 2, 1];
+        calculateEstimates[expr_, baseAssums_, points_] := 
+        Module[{{assums, part}}, assums = createAssums[baseAssums, points];
+        part = Prepend[#, d] & /@ Partition[points, 2, 1];
+        log["\n== Verification run =="]; 
+        logForm["Formula", expr];
+        logForm["Base assumptions", baseAssums];
+        logForm["Breakpoints", points];
+        Do[logForm["Subdomain "<>ToString[i], assums[[i]]], {{i, Length[assums]}}];
         MapThread[
-            Integrate[reducedForm[expr, #1], #2, Assumptions -> #1] &,
-            {{assums, part}}
-        ]
-        ];
+            Integrate[reducedFormIndexed[expr, #1, #3], #2, 
+            Assumptions -> #1] &, {{assums, part, Range[Length[assums]]}}]];
 
-        res1 = Flatten@calculateEstimates[{series.formula}, {' && '.join([series.summation_index+">1", series.conditions])},{response}];
+        
+        baseAssumptions = {' && '.join([series.summation_index+">1", series.conditions])};
+        res1 = Flatten@calculateEstimates[{series.formula}, baseAssumptions,{response}];
 
+        log["Trying constant C = "<>ToString[10^{c}, InputForm]];
         res2= Resolve[ForAll[{series.other_variables}, 
             Implies[{series.conditions}, # <= 10^{c}*{series.conjectured_upper_asymptotic_bound}]], Reals] & /@ res1;
+        logForm["Resolve results", res2];
             
         If[AllTrue[res2,TrueQ],True,res2]
         """)
@@ -336,6 +351,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
