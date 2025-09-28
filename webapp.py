@@ -3,6 +3,7 @@ import io
 import sys
 import tempfile
 from contextlib import redirect_stdout
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header
@@ -11,6 +12,9 @@ from pydantic import BaseModel
 
 from experiments import parse_series_smart, parse_inequality
 from series_summation import series_to_bound
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def _auth_or_401(token_header: Optional[str]):
@@ -48,17 +52,27 @@ def run_series(series: series_to_bound) -> str:
         # Prepare environment: put temp dir first on PYTHONPATH so `import examples` hits ours
         env = os.environ.copy()
         existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = td + (os.pathsep + existing if existing else "")
+        path_parts = [td, str(PROJECT_ROOT)]
+        if existing:
+            path_parts.append(existing)
+        env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
         # Call the CLI entry via Python to avoid reliance on console-script resolution
         code = (
-            f"import sys; sys.path.insert(0, {repr(td)}); "
+            f"import sys; sys.path.insert(0, {repr(str(PROJECT_ROOT))}); "
+            f"sys.path.insert(0, {repr(td)}); "
             "sys.argv=['decomp','series','web_series']; "
             "import cli; cli.main()"
         )
 
         import subprocess as sp
-        proc = sp.run([sys.executable, "-c", code], env=env, cwd=td, text=True, capture_output=True)
+        proc = sp.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=str(PROJECT_ROOT),
+            text=True,
+            capture_output=True,
+        )
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Execution failed: {proc.stderr.strip()}")
         return (proc.stderr or "") + (proc.stdout or "")
@@ -95,14 +109,24 @@ def run_inequality(vars_s: str, domain_s: str, lhs: str, rhs: str) -> str:
             f.write(py)
         env = os.environ.copy()
         existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = td + (os.pathsep + existing if existing else "")
+        path_parts = [td, str(PROJECT_ROOT)]
+        if existing:
+            path_parts.append(existing)
+        env["PYTHONPATH"] = os.pathsep.join(path_parts)
         code = (
-            f"import sys; sys.path.insert(0, {repr(td)}); "
+            f"import sys; sys.path.insert(0, {repr(str(PROJECT_ROOT))}); "
+            f"sys.path.insert(0, {repr(td)}); "
             "sys.argv=['decomp','prove','web_inequality']; "
             "import cli; cli.main()"
         )
         import subprocess as sp
-        proc = sp.run([sys.executable, "-c", code], env=env, cwd=td, text=True, capture_output=True)
+        proc = sp.run(
+            [sys.executable, "-c", code],
+            env=env,
+            cwd=str(PROJECT_ROOT),
+            text=True,
+            capture_output=True,
+        )
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Execution failed: {proc.stderr.strip()}")
         return (proc.stderr or "") + (proc.stdout or "")
@@ -209,13 +233,25 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
     if req.mode == "by_name":
         if not req.cmd or not req.name:
             raise HTTPException(status_code=400, detail="Provide cmd ('series'|'prove'|'solve') and name (e.g., series_1 or inequality_1)")
+        env = os.environ.copy()
+        existing = env.get("PYTHONPATH", "")
+        path_parts = [str(PROJECT_ROOT)]
+        if existing:
+            path_parts.append(existing)
+        env["PYTHONPATH"] = os.pathsep.join(path_parts)
         code = (
-            "import sys; "
+            f"import sys; sys.path.insert(0, {repr(str(PROJECT_ROOT))}); "
             f"sys.argv=['decomp',{repr(req.cmd)},{repr(req.name)}]; "
             "import cli; cli.main()"
         )
         import subprocess as sp
-        proc = sp.run([sys.executable, "-c", code], text=True, capture_output=True, env=os.environ.copy())
+        proc = sp.run(
+            [sys.executable, "-c", code],
+            text=True,
+            capture_output=True,
+            env=env,
+            cwd=str(PROJECT_ROOT),
+        )
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Execution failed: {proc.stderr.strip()}")
         return JSONResponse({
