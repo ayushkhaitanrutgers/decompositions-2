@@ -10,7 +10,7 @@ TUNNEL_NAME="${TUNNEL_NAME:-decomp-web}"
 
 if [[ -z "${WOLFRAMSCRIPT:-}" ]]; then
   echo "WARNING: WOLFRAMSCRIPT is not set. If auto-detect fails, set it, e.g.:" >&2
-  echo "  export WOLFRAMSCRIPT=/Applications/Wolfram.app/Contents/MacOS/WolframScript" >&2
+  echo "  export WOLFRAMSCRIPT=/Users/ayushkhaitan/Desktop/Wolfram.app/Contents/MacOS/wolframscript" >&2
 fi
 
 if ! command -v cloudflared >/dev/null 2>&1; then

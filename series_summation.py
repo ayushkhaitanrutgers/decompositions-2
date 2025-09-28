@@ -1,80 +1,34 @@
-import subprocess, shlex, os, shutil, json
-from typing import Any, List
-from llm_client import api_call, api_call_series
+import json
+import os
+import tempfile
 from dataclasses import dataclass
+from typing import Any, List
+import pathlib
 import re
-import tempfile, pathlib, subprocess, os
+import subprocess
+
+from llm_client import api_call, api_call_series
+import mathematica_export as wl
+
 
 def wl_run_file(code: str, form: str = "InputForm") -> str:
-    env = _clean_env()
+    """Execute multi-line Wolfram code either via cloud or local kernel."""
+
+    wrapped = f"ToString[\n(\n{code}\n), {form}\n]"
+    if getattr(wl, "_USE_WOLFRAM_CLOUD", False):
+        print("[wolfram] Using Wolfram Cloud endpoint", flush=True)
+        return wl._cloud_eval(wrapped)  # type: ignore[attr-defined]
+
+    if not getattr(wl, "WOLFRAMSCRIPT", None):
+        raise RuntimeError("wolframscript binary unavailable for local execution")
+
+    env = wl._clean_env()  # type: ignore[attr-defined]
     with tempfile.TemporaryDirectory() as td:
-        p = pathlib.Path(td) / "script.wl"
-        # Wrap in ToString[...] here so the -file returns plain text
-        p.write_text(f"ToString[\n(\n{code}\n), {form}\n]")
-        out = subprocess.check_output([WOLFRAMSCRIPT, "-file", str(p)], text=True, env=env)
-    return out.strip()
-
-
-def _resolve_wolframscript() -> str:
-    # Prefer explicit env override
-    env_path = os.environ.get("WOLFRAMSCRIPT")
-    if env_path and os.path.isfile(env_path) and os.access(env_path, os.X_OK):
-        return env_path
-
-    # Try PATH
-    which_path = shutil.which("wolframscript")
-    if which_path:
-        return which_path
-
-    # Common install locations (include default Wolfram.app path on macOS)
-    for p in (
-        "/Applications/Wolfram.app/Contents/MacOS/WolframScript",
-        "/usr/local/bin/wolframscript",
-        "/opt/homebrew/bin/wolframscript",
-    ):
-        if os.path.isfile(p) and os.access(p, os.X_OK):
-            return p
-
-    raise FileNotFoundError(
-        "wolframscript not found. Set $WOLFRAMSCRIPT or ensure it's on PATH."
-    )
-
-WOLFRAMSCRIPT = _resolve_wolframscript()
-
-def _clean_env() -> dict:
-    # strip DYLD* to avoid collisions; preserve PATH
-    env = {k: v for k, v in os.environ.items() if not k.startswith("DYLD")}
-    env["PATH"] = os.environ.get("PATH", "")
-    return env
-
-def wl_eval(expr: str, form: str = "InputForm") -> str:
-    """Evaluate Wolfram Language `expr` and return string in `form`.
-
-    - `form` examples: "InputForm", "FullForm", "OutputForm".
-    - Returns the exact textual rendering from wolframscript.
-    """
-    env = _clean_env()
-    wrapped = f'ToString[({expr}), {form}]'
-    cmd = [WOLFRAMSCRIPT, "-code", wrapped]
-    return subprocess.check_output(cmd, text=True, env=env).strip()
-
-def wl_eval_json(expr: str):
-    """Evaluate `expr` and parse result via Wolfram's JSON export.
-
-    Uses ExportString[..., "JSON"] on the Wolfram side, then json.loads.
-    Not all symbolic results are JSON-serializable; in that case this raises.
-    """
-    env = _clean_env()
-    wrapped = f'ExportString[({expr}), "JSON"]'
-    cmd = [WOLFRAMSCRIPT, "-code", wrapped]
-    data = subprocess.check_output(cmd, text=True, env=env).strip()
-    return json.loads(data)
-
-def wl_bool(expr: str) -> bool:
-    out = wl_eval(expr, form="InputForm")
-    if out == "True": return True
-    if out == "False": return False
-    raise ValueError(f"Unexpected output: {out!r}")
+        script_path = pathlib.Path(td) / "script.wl"
+        script_path.write_text(wrapped)
+        cmd = [wl.WOLFRAMSCRIPT, "-file", str(script_path)]
+        print(f"[wolfram] Using local wolframscript {wl.WOLFRAMSCRIPT}", flush=True)
+        return subprocess.check_output(cmd, text=True, env=env).strip()
 
 #The following is to separate the executables
 def attempt_proof(vars,conds, lhs, rhs):
@@ -91,7 +45,7 @@ def attempt_proof(vars,conds, lhs, rhs):
         conds_text = conds.strip()
         if conds_text.startswith('{') and conds_text.endswith('}'):
             conds_text = conds_text[1:-1]
-        a=wl_eval(f"""witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
+        a = wl.wl_eval(f"""witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
   Module[{{S}}, S = If[conds === {{}}, True, And @@ conds];
    Resolve[ForAll[vars, Implies[S, lhs <= 10^c*rhs]], Reals]];
 
@@ -170,25 +124,33 @@ def ask_llm_series(series: series_to_bound):
     
     count=0
     
+    paclet_setup = (
+        """
+        Needs["PacletManager`"];
+        Quiet[Check[PacletUninstall["UnitTable"], Null]];
+        Quiet[Check[PacletInstall["UnitTable"], Null]];
+        """
+        if not getattr(wl, "_USE_WOLFRAM_CLOUD", False)
+        else "Quiet[Check[Needs[\"UnitTable`\"], Null]];"
+    )
+
     for c in range(5):
         ante_code = "True" if getattr(series, "conditions", "") == "" else series.conditions
         vars_text = "True" if getattr(series, "other_variables", "") == "" else series.other_variables
 
         if vars_text.startswith("{") and vars_text.endswith("}"):
             vars_text = vars_text[1:-1].strip()
-        a = wl_eval (f"""
+        result_packet = wl.wl_eval_json(
+        f"""
         Clear[LeadingSummand, DominancePiecewise, LeastSummand, 
         AntiDominancePiecewise, expandPowersInProductNoNumbers, reducedForm,
         createAssums, calculateEstimates, expr, baseAssums];
 
-        (* Logging helpers: write to stderr so Python stdout stays clean *)
-        log[s_String] := WriteString["stderr", s<>"\n"];
-        logForm[label_String, expr_] := WriteString["stderr", label<>": "<>ToString[expr, InputForm]<>"\n"];
+        logMessages = Table[Null, {0}];
+        log[s_String] := AppendTo[logMessages, s];
+        logForm[label_String, expr_] := log[label <> ": " <> ToString[expr, InputForm]];
 
-        Needs["PacletManager`"];
-        PacletUninstall["UnitTable"];         
-        PacletInstall["UnitTable"];           
-
+        {paclet_setup}
 
         LeadingSummand[sum_, assum_] := 
         Module[{{terms, vars, dominatesQ, winners}}, 
@@ -286,16 +248,21 @@ def ask_llm_series(series: series_to_bound):
             Implies[{series.conditions}, # <= 10^{c}*{series.conjectured_upper_asymptotic_bound}]], Reals] & /@ res1;
         logForm["Resolve results", res2];
             
-        If[AllTrue[res2,TrueQ],True,res2]
+        <|"Logs" -> logMessages, "Result" -> If[AllTrue[res2, TrueQ], True, res2]|>
         """)
-        if a == "True":
-            print('All estimates verified')
+
+        for line in result_packet.get("Logs", []):
+            print(line)
+
+        a = result_packet.get("Result")
+        if a is True:
+            print("All estimates verified")
             break
         else:
-            count+=1
-            print('Not verified')
-    if count ==5:
-        print('Try prompting the LLM again. The verification has failed up to a positive constant C = 10^4')
+            count += 1
+            print("Not verified")
+    if count == 5:
+        print("Try prompting the LLM again. The verification has failed up to a positive constant C = 10^4")
     
 series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", conditions = "h >1 && m > 1", summation_index="d", other_variables="{h,m}", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
 

@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
-from llm_client import generate_text
+from llm_client import api_call, generate_text
 from series_summation import series_to_bound
-from typing import Tuple
 
 
 _SYSTEM = (
@@ -226,78 +225,131 @@ def demo_from_prompt() -> None:
 
 
 # ------------------------
+# Shared normalization helpers
+# ------------------------
+
+
+_LOG_FUNS = ("log", "Log", "\\log")
+_EXP_FUNS = ("exp", "Exp", "\\exp")
+
+
+def _normalize_to_wl(expr: str) -> str:
+    """Normalize informal or LaTeX math into Mathematica syntax."""
+
+    s = expr
+    s = s.replace("\t", " ").replace("\\,", "")
+    s = s.replace("×", "*").replace("·", "*").replace("\\times", "*")
+    for name in _LOG_FUNS:
+        pattern = re.escape(name)
+        s = re.sub(rf"{pattern}\\s*([A-Za-z]\\w*)", r"log(\1)", s)
+    for name in _EXP_FUNS:
+        pattern = re.escape(name)
+        s = re.sub(rf"{pattern}\\s*([A-Za-z]\\w*)", r"exp(\1)", s)
+    s = re.sub(r"\be\^\(([^)]*)\)", r"exp(\1)", s)
+    s = re.sub(r"\be\^([A-Za-z]\\w*)", r"exp(\1)", s)
+    s = _productize_simple(s)
+    s = re.sub(r"log\s*\((.*?)\)", r"Log[\1]", s)
+    s = re.sub(r"exp\s*\((.*?)\)", r"Exp[\1]", s)
+    s = re.sub(r"\\log\s*\((.*?)\)", r"Log[\1]", s)
+    s = re.sub(r"\\exp\s*\((.*?)\)", r"Exp[\1]", s)
+    try:
+        return _latex_to_wl(s)
+    except Exception:
+        return s
+
+
+# ------------------------
 # Inequality parser (LLM)
 # ------------------------
 
 def parse_inequality(text: str) -> Tuple[str, str, str, str]:
-    """Parse a free-form inequality description into
-    (variables, domain_description, lhs, rhs) using the LLM.
+    """Parse a free-form inequality description into an `inequality` spec.
 
-    Returns strings suitable for mathematica_export.inequality:
-      - variables: WL list string like "{x,y}" (no spaces required)
-      - domain_description: WL list of conditions like "{x>0, y>1}"
-      - lhs, rhs: WL expressions using Log[], Exp[]
+    Attempts an LLM-based parse first; falls back to deterministic parsing on
+    failure. Ensures the output uses Mathematica syntax compatible with the
+    downstream CAS workflow.
     """
-    system = (
-        "You convert a math inequality description into a strict JSON spec "
-        "with Mathematica-parsable fields. Return only compact JSON."
-    )
-    prompt = f"""
-Return a JSON object with exactly these string keys:
-  variables: Mathematica list of symbols, e.g., {{x,y}}
-  domain_description: Mathematica list of conditions, e.g., {{x>0, y>1}}
-  lhs: Mathematica expression (use Log[], Exp[] as needed)
-  rhs: Mathematica expression
 
-Rules:
-- Use only Mathematica-parsable syntax: Log[], Exp[], ^, *, /, +, -, parentheses/braces.
-- Do not include LaTeX markup (\\sum, \\frac, etc.). Convert to Mathematica.
-- Keep variable names as simple ASCII identifiers.
-- Return ONLY compact JSON, no code fences or commentary.
+    try:
+        return _llm_parse_inequality(text)
+    except Exception:
+        return parse_inequality_text(text)
 
-Text to parse:
+
+def _ensure_brace_list(value: str) -> str:
+    txt = value.strip()
+    if not txt or txt == "{}":
+        return "{}"
+    if txt.lower() == "true":
+        return "True"
+    if txt.startswith("{") and txt.endswith("}"):
+        inner = txt[1:-1].strip()
+        if not inner:
+            return "{}"
+        return "{" + ", ".join([p.strip() for p in inner.split(",") if p.strip()]) + "}"
+    parts = [p.strip() for p in txt.split(",") if p.strip()]
+    if not parts:
+        return "{}"
+    return "{" + ", ".join(parts) + "}"
+
+
+def _llm_parse_inequality(text: str) -> Tuple[str, str, str, str]:
+    output_format = '{"variables":"{...}","domain_description":"{...}","lhs":"...","rhs":"..."}'
+    prompt = f"""<code_editing_rules>
+  <guiding_principles>
+    – Be precise and deterministic.
+    – Output only compact JSON with fields using Mathematica syntax (Log[], Exp[], Sqrt[], ^, *, /, +, -).
+    – Convert any LaTeX (\\sum, \^, subscripts) into Mathematica expressions.
+    – Preserve every explicit domain constraint; if none are given, use {{}}.
+    – Include every variable appearing in the inequality or domain.
+  </guiding_principles>
+
+  <task>
+    Read the following description of an inequality. Produce the specification
+    required to construct `inequality(variables=..., domain_description=..., lhs=..., rhs=...)`.
+    Interpret symbols like «<<» or «≪» as describing that the left-hand side
+    should be bounded by the right-hand side (use the same expressions for lhs
+    and rhs).
+  </task>
+
+  <output_format>
+    {output_format}
+  </output_format>
+</code_editing_rules>
+
+Description:
 {text}
 """
-    try:
-        out = generate_text(prompt=prompt, system_instruction=system, model="gemini-2.5-flash", max_output_tokens=512)
-        spec = _extract_json(out)
-        def _req(k: str) -> str:
-            v = spec.get(k, "")
-            if not isinstance(v, str) or not v.strip():
-                raise ValueError(f"Missing or invalid field: {k}")
-            return v.strip()
-        variables = _req("variables")
-        domain = _req("domain_description")
-        lhs = _req("lhs")
-        rhs = _req("rhs")
-        # Normalize lhs/rhs into Mathematica style
-        def _norm(expr: str) -> str:
-            s = expr
-            s = re.sub(r"\\log\\s*([A-Za-z]\\w*)", r"\\log(\1)", s)
-            s = re.sub(r"\\exp\\s*([A-Za-z]\\w*)", r"\\exp(\1)", s)
-            s = re.sub(r"\be\^\(([^)]*)\)", r"\\exp(\1)", s)
-            s = re.sub(r"\be\^([A-Za-z]\\w*)", r"\\exp(\1)", s)
-            s = _productize_simple(s)
-            try:
-                return _latex_to_wl(s)
-            except Exception:
-                return s
-        lhs = _norm(lhs)
-        rhs = _norm(rhs)
-        # Wrap braces if missing
-        if not (variables.startswith("{") and variables.endswith("}")):
-            variables = "{" + variables.strip("{} ") + "}"
-        if not (domain.startswith("{") and domain.endswith("}")):
-            domain = "{" + domain.strip("{} ") + "}"
-        # Derive variables if empty
-        inner_vars = variables.strip()[1:-1].strip() if variables.startswith("{") and variables.endswith("}") else variables
-        if not inner_vars:
-            names = sorted(set(re.findall(r"[A-Za-z]\\w*", (domain or "") + "," + lhs + "," + rhs)))
-            variables = "{" + ",".join(names) + "}"
-        return variables, domain, lhs, rhs
-    except Exception:
-        # Fallback to deterministic parse for simple inputs
-        return parse_inequality_text(text)
+
+    raw = api_call(prompt=prompt)
+    spec = _extract_json(raw)
+
+    def _field(name: str) -> str:
+        val = spec.get(name, "")
+        if not isinstance(val, str) or not val.strip():
+            raise ValueError(f"Missing or invalid field: {name}")
+        return val.strip()
+
+    variables_raw = _field("variables")
+    domain_raw = _field("domain_description")
+
+    variables = _ensure_brace_list(variables_raw)
+    domain = _ensure_brace_list(domain_raw)
+    lhs = _normalize_to_wl(_field("lhs"))
+    rhs = _normalize_to_wl(_field("rhs"))
+
+    # Derive variables if still empty
+    inner = variables[1:-1].strip() if variables.startswith("{") and variables.endswith("}") else variables
+    if not inner:
+        symbol_set = set(re.findall(r"[A-Za-z]\\w*", ",".join([domain, lhs, rhs])))
+        symbol_set -= {"Log", "Exp"}
+        names = sorted(symbol_set)
+        variables = "{" + ",".join(names) + "}"
+
+    if domain == "{}" and "&&" in domain_raw:
+        domain = "{" + ", ".join([p.strip() for p in domain_raw.split("&&") if p.strip()]) + "}"
+
+    return variables, domain, lhs, rhs
 
 
 def _strip_dollars_all(s: str) -> str:
@@ -341,33 +393,8 @@ def parse_inequality_text(text: str) -> Tuple[str, str, str, str]:
         # No explicit bounds; default empty domain
         rhs_raw = rhs_and_rest
         dom_text = ""
-    def _norm(expr: str) -> str:
-        s = expr
-        # Multiplication tokens
-        s = s.replace("\\times", "*")
-        s = s.replace("×", "*")
-        s = s.replace("·", "*")
-        # Normalize log/exp with/without backslash
-        s = re.sub(r"\\log\\s*([A-Za-z]\\w*)", r"\\log(\1)", s)
-        s = re.sub(r"\\exp\\s*([A-Za-z]\\w*)", r"\\exp(\1)", s)
-        s = re.sub(r"\blog\s*([A-Za-z]\\w*)", r"log(\1)", s)
-        s = re.sub(r"\bexp\s*([A-Za-z]\\w*)", r"exp(\1)", s)
-        # e^(...) and e^x -> \exp(...)
-        s = re.sub(r"\be\^\(([^)]*)\)", r"\\exp(\1)", s)
-        s = re.sub(r"\be\^([A-Za-z]\\w*)", r"\\exp(\1)", s)
-        # Productize simple spaces
-        s = _productize_simple(s)
-        # Convert to Mathematica style (Log[], Exp[])
-        s = re.sub(r"\blog\s*\((.*?)\)", r"Log[\1]", s)
-        s = re.sub(r"\\log\s*\((.*?)\)", r"Log[\1]", s)
-        s = re.sub(r"\bexp\s*\((.*?)\)", r"Exp[\1]", s)
-        s = re.sub(r"\\exp\s*\((.*?)\)", r"Exp[\1]", s)
-        try:
-            return _latex_to_wl(s)
-        except Exception:
-            return s
-    lhs = _norm(lhs_raw)
-    rhs = _norm(rhs_raw)
+    lhs = _normalize_to_wl(lhs_raw)
+    rhs = _normalize_to_wl(rhs_raw)
     # Build domain conditions and variable list robustly
     var_set = []
     conds = []

@@ -1,154 +1,260 @@
-import subprocess, shlex, os, shutil, json
-from typing import Any, List
-from llm_client import api_call, api_call_series
+import json
+import os
+import shutil
+import subprocess
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
-import re
+from typing import List, Optional
+
+from llm_client import api_call
+
+
+def _load_env_var(key: str) -> Optional[str]:
+    """Resolve `key`, falling back to loading .env-style files if needed."""
+
+    value = os.environ.get(key)
+    if value:
+        return value
+
+    try:
+        from dotenv import load_dotenv  # type: ignore
+
+        load_dotenv()
+        value = os.environ.get(key)
+        if value:
+            return value
+    except Exception:
+        pass
+
+    env_path = os.path.join(os.getcwd(), ".env")
+    if not os.path.isfile(env_path):
+        return None
+
+    try:
+        with open(env_path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export ") :]
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                if k != key:
+                    continue
+                v = v.strip().strip('\"\'')
+                os.environ.setdefault(k, v)
+                return v
+    except Exception:
+        return None
+
+    return os.environ.get(key)
+
 
 def _resolve_wolframscript() -> str:
-    # Prefer explicit env override
+    """Return a usable wolframscript executable path."""
     env_path = os.environ.get("WOLFRAMSCRIPT")
     if env_path and os.path.isfile(env_path) and os.access(env_path, os.X_OK):
         return env_path
 
-    # Try PATH
     which_path = shutil.which("wolframscript")
     if which_path:
         return which_path
 
-    # Common install locations (include default Wolfram.app path on macOS)
-    for p in (
-        "/Applications/Wolfram.app/Contents/MacOS/WolframScript",
+    for candidate in (
+        "/Users/ayushkhaitan/Desktop/Wolfram.app/Contents/MacOS/wolframscript",
+        "/Applications/Wolfram.app/Contents/MacOS/wolframscript",
+        "/Applications/WolframScript.app/Contents/MacOS/wolframscript",
         "/usr/local/bin/wolframscript",
         "/opt/homebrew/bin/wolframscript",
     ):
-        if os.path.isfile(p) and os.access(p, os.X_OK):
-            return p
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
 
     raise FileNotFoundError(
         "wolframscript not found. Set $WOLFRAMSCRIPT or ensure it's on PATH."
     )
 
-WOLFRAMSCRIPT = _resolve_wolframscript()
+
+WOLFRAM_API_URL: Optional[str] = _load_env_var("WOLFRAM_API_URL")
+_USE_WOLFRAM_CLOUD = bool(WOLFRAM_API_URL)
+_WOLFRAM_TIMEOUT = float(os.environ.get("WOLFRAM_TIMEOUT", "120"))
+
+WOLFRAMSCRIPT: Optional[str]
+if _USE_WOLFRAM_CLOUD:
+    WOLFRAMSCRIPT = None
+else:
+    WOLFRAMSCRIPT = _resolve_wolframscript()
+
 
 def _clean_env() -> dict:
-    # strip DYLD* to avoid collisions; preserve PATH
+    """Return a sanitized environment for launching wolframscript."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("DYLD")}
     env["PATH"] = os.environ.get("PATH", "")
     return env
 
-def wl_eval(expr: str, form: str = "InputForm") -> str:
-    """Evaluate Wolfram Language `expr` and return string in `form`.
 
-    - `form` examples: "InputForm", "FullForm", "OutputForm".
-    - Returns the exact textual rendering from wolframscript.
-    """
-    env = _clean_env()
+def _cloud_eval(code: str) -> str:
+    if not WOLFRAM_API_URL:
+        raise RuntimeError("WOLFRAM_API_URL is not configured for cloud execution.")
+
+    data = urllib.parse.urlencode({"code": code}).encode("utf-8")
+    request = urllib.request.Request(
+        WOLFRAM_API_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=_WOLFRAM_TIMEOUT) as response:
+        charset = response.headers.get_content_charset() or "utf-8"
+        return response.read().decode(charset).strip()
+
+
+def _normalize_expr(expr: str) -> str:
+    return expr.replace("exp[", "Exp[").replace("log[", "Log[")
+
+
+def _dedupe_preserve(items: List[str]) -> List[str]:
+    seen = set()
+    ordered: List[str] = []
+    for item in items:
+        key = item
+        if key not in seen:
+            seen.add(key)
+            ordered.append(item)
+    return ordered
+
+
+def _domain_parts(domain: str) -> List[str]:
+    stripped = domain.strip()
+    if stripped.lower() == "true":
+        return []
+    if stripped.startswith("{") and stripped.endswith("}"):
+        stripped = stripped[1:-1]
+    return [p.strip() for p in stripped.split(",") if p.strip()]
+
+
+def _as_mathematica_list(text: str, allow_true: bool = False) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return "{}"
+    if allow_true and stripped.lower() == "true":
+        return "True"
+    if stripped.lower() == "true":
+        return "{}"
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    parts = [p.strip() for p in stripped.split(",") if p.strip()]
+    if not parts:
+        return "{}"
+    return "{" + ", ".join(parts) + "}"
+
+
+def _parse_subdomains(raw: str) -> List[str]:
+    if not raw:
+        return []
+    stripped = raw.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        stripped = stripped.strip("`").split("\n", 1)[-1]
+        if stripped.endswith("```"):
+            stripped = stripped[: -3]
+        stripped = stripped.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        stripped = stripped[1:-1]
+    if not stripped:
+        return []
+
+    pieces = []
+    current = []
+    depth = 0
+    for ch in stripped:
+        if ch == "," and depth == 0:
+            segment = "".join(current).strip()
+            if segment:
+                pieces.append(segment)
+            current = []
+            continue
+        if ch in "({[":
+            depth += 1
+        elif ch in ")}]" and depth > 0:
+            depth -= 1
+        current.append(ch)
+    if current:
+        segment = "".join(current).strip()
+        if segment:
+            pieces.append(segment)
+    return pieces
+
+
+def wl_eval(expr: str, form: str = "InputForm") -> str:
+    """Evaluate a Wolfram Language expression and return the textual output."""
     wrapped = f'ToString[({expr}), {form}]'
+    if _USE_WOLFRAM_CLOUD:
+        print("[wolfram] Using Wolfram Cloud endpoint", flush=True)
+        return _cloud_eval(wrapped)
+    if not WOLFRAMSCRIPT:
+        raise RuntimeError("wolframscript binary unavailable for local execution")
+    print("[wolfram] Using local wolframscript", WOLFRAMSCRIPT, flush=True)
     cmd = [WOLFRAMSCRIPT, "-code", wrapped]
-    return subprocess.check_output(cmd, text=True, env=env).strip()
+    return subprocess.check_output(cmd, text=True, env=_clean_env()).strip()
+
 
 def wl_eval_json(expr: str):
-    """Evaluate `expr` and parse result via Wolfram's JSON export.
-
-    Uses ExportString[..., "JSON"] on the Wolfram side, then json.loads.
-    Not all symbolic results are JSON-serializable; in that case this raises.
-    """
-    env = _clean_env()
     wrapped = f'ExportString[({expr}), "JSON"]'
-    cmd = [WOLFRAMSCRIPT, "-code", wrapped]
-    data = subprocess.check_output(cmd, text=True, env=env).strip()
+    if _USE_WOLFRAM_CLOUD:
+        print("[wolfram] Using Wolfram Cloud endpoint", flush=True)
+        data = _cloud_eval(wrapped)
+    else:
+        if not WOLFRAMSCRIPT:
+            raise RuntimeError("wolframscript binary unavailable for local execution")
+        print("[wolfram] Using local wolframscript", WOLFRAMSCRIPT, flush=True)
+        cmd = [WOLFRAMSCRIPT, "-code", wrapped]
+        data = subprocess.check_output(cmd, text=True, env=_clean_env()).strip()
     return json.loads(data)
+
 
 def wl_bool(expr: str) -> bool:
     out = wl_eval(expr, form="InputForm")
-    if out == "True": return True
-    if out == "False": return False
+    if out == "True":
+        return True
+    if out == "False":
+        return False
     raise ValueError(f"Unexpected output: {out!r}")
 
-#The following is to separate the executables
-def attempt_proof(vars, conds, lhs, rhs):
-    # Try a modest constant factor c = 0 only (as before)
 
-    for c in range(5):
-        status = False
-        # Normalize WL heads without changing math content
-        lhs_wl = lhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
-        rhs_wl = rhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
+def attempt_proof(vars_str: str, conds_str: str, lhs: str, rhs: str) -> str:
+    vars_wl = _as_mathematica_list(vars_str, allow_true=True)
+    conds_wl = _as_mathematica_list(conds_str)
+    lhs_wl = _normalize_expr(lhs)
+    rhs_wl = _normalize_expr(rhs)
 
-        # Normalize variables and conditions into single-braced WL lists
-        vars_text = vars.strip()
-        if vars_text.startswith('{') and vars_text.endswith('}'):
-            vars_text = vars_text[1:-1]
-        vars_code = '{' + vars_text + '}' if vars_text else '{}'
-        print(vars_code)
-
-        conds_code = conds.strip()
-
-        # Ensure exactly one level of braces around conditions
-        if not (conds_code.startswith('{') and conds_code.endswith('}')):
-            conds_code = '{' + conds_code + '}' if conds_code else '{}'
-
-        a = wl_eval(
+    for c in range(1):
+        raw = wl_eval(
             f"""
-Clear[witnessBigO, witnessBigOAnyOrder, witnessBigOAnyOrderFast];
-
-(*Your original predicate (use System`Resolve to avoid any shadowing)*)
-witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
-  Module[{{S = And @@ conds}}, 
-   System`Resolve[ForAll[vars, Implies[S, lhs <= 10^c*rhs]], Reals]];
-
-(*Simple:try every permutation and return True if any run yields True*)
-witnessBigOAnyOrder[vars_, conds_, lhs_, rhs_, c_] := 
+Block[{{witnessBigO, witnessBigOAny}}, 
+ witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
+  Module[{{S}}, 
+   S = If[conds === {{}} || conds === {{}}, True, And @@ conds];
+   Resolve[ForAll[vars, Implies[S, lhs <= 10^c rhs]], Reals]];
+ (*True if ANY permutation of vars makes the predicate resolve to True\
+*)witnessBigOAny[vars_, conds_, lhs_, rhs_, c_] := 
   AnyTrue[Permutations[vars], 
    TrueQ@witnessBigO[#, conds, lhs, rhs, c] &];
-
-(*Fast short-circuiting variant*)
-witnessBigOAnyOrderFast[vars_, conds_, lhs_, rhs_, c_] := 
-  Catch[Scan[
-    Function[v, 
-     If[TrueQ@witnessBigO[v, conds, lhs, rhs, c], 
-      Throw[True]  (*stop as soon as one order works*)]], 
-    Permutations[vars]];
-   False];
-witnessBigOAnyOrder[{vars_code}, {conds_code}, {lhs_wl}, {rhs_wl}, {c}]
-
-
+  witnessBigOAny[{vars_wl}, {conds_wl}, {lhs_wl}, {rhs_wl}, {c}]
+]
             """
         )
-        if a == 'True':
-            status = True
-            print('hululu')
-            return 'It is proved'
-        elif a == 'False':
-            status = True
-            return 'This is False'
-        else:
-            continue
-    if status is False:
-        return 'Status unknown. Try a different setup'
-        
+        if raw == "True":
+            return "It is proved"
+        if raw == "False":
+            return "This is False"
 
-# prompt = """I want to prove that in the domain x>0 and y>1, we have that x*y <= y*log[y]+Exp[x].
-# This proof becomes trivial if the domain is decomposed into the right subdomains. Find these correct decompositions for me.
-# Just give me the description of the subdomains in the form of an array, where each element of the array describes some subdomain. 
-# Be very careful. You're the best at mathematics. You don't make mistakes in such calculations. 
+    return "Status unknown. Try a different setup"
 
-# When using inequalities, just use the <, >, <=, >= signs. Don't use \leq or \geq. Don't include any words or any other symbols. """
-    
-# print(api_call(prompt = prompt))
-    
-# prompt = """Consider this series: \[
-#     \sum_{d=0}^{\infty} \frac{2d + 1}{2h^2 \left( 1 + \frac{d(d+1)}{h^2} \right) \left( 1 + \frac{d(d+1)}{h^2 m^2} \right)^2} \ll 1 + \log(m^2)
-#     \] for h, m \geq 1. Give me values for d_0=0,d_1, d_2,..,d_k=Infinity such that if S_d_k is defined 
-#     as the sum from d=d_{k} to d_{k+1}, then proving this estimate for each S_{d_i} becomes very easy. Here << means that there exists
-#     a positive constant C>0 such that the left side <= C. right side, for all h,m\geq 1. I only want the output as [d_1,d_2,...,d_k]. Don't give me any more words. Don't include 0 or infinity in your answer. Don't put any signs or anything apart from 
-#     just the array. When you sare multiplying variables, don't forget to include * between them"""
-# result = api_call(prompt=prompt, parse=True)
-# for a in result:
-#     print(a)
-
-# Alright, let's make everything systematic. Wrap it up in a function that can be called. 
-# Don't write down any executables. But we can write down a class. 
 
 @dataclass
 class inequality:
@@ -156,79 +262,82 @@ class inequality:
     domain_description: str
     lhs: str
     rhs: str
-    
-inequality_1 = inequality(variables = "x, y", domain_description="x>0, y>1", lhs= "x*y", rhs = "y*Log[y]+exp[x]")
-inequality_2 = inequality(variables = "x,y,z", domain_description = "x>0, y>0, z>0", lhs = "(x*y*z)^(1/3)", rhs = "(x+y+z)/3")
-# res = attempt_proof(inequality_1.variables, inequality_1.domain_description+", x <= 2 Log[y]", inequality_1.lhs, inequality_1.rhs)
-# print(res)
 
 
-def try_and_prove(inequality: inequality):
+def try_and_prove(problem: "inequality") -> str:
+    base_parts = _domain_parts(problem.domain_description)
+    base_clause = " && ".join(base_parts) if base_parts else "True"
+    domain_for_prompt = ", ".join(base_parts) if base_parts else "True"
+    output_format = (
+        f"[{base_clause} && subdomain1, {base_clause} && subdomain2, ...]"
+        if base_parts
+        else "[subdomain1, subdomain2, ...]"
+    )
+
     prompt = f"""<code_editing_rules>
   <guiding_principles>
     – Be precise, avoid conflicting instructions
-    – Use natural subdomains so inequality proof is trivial
-    – Minimize the number of subdomains
-    – Output only subdomains, no extra words or symbols
-    – Use only <=, >=, <, >, Log[], Exp[] in the output. 
-    Only use Mathematical notation that the software Mathematica can parse
+    – Use natural subdomains so the inequality proof is trivial
+    – Minimize the number of subdomains while covering the whole domain
+    – Output only Mathematica-parsable inequalities using <, >, <=, >=, Log[], Exp[]
   </guiding_principles>
 
   <task>
-    Given domain: {inequality.domain_description}
-    Inequality: {inequality.lhs} <= {inequality.rhs}
-    Find minimal subdomains that make proving the inequality/asymptotic estimate trivial.
-    The union of these subdomains should be the whole domain.
+    Given domain: {domain_for_prompt}
+    Inequality: {problem.lhs} <= {problem.rhs}
+    Return a list of subdomains whose union is the domain and on which the proof is trivial.
+    Find the simplest subdomains. Prioritize simplicity. 
   </task>
 
   <output_format>
-    [{' && '.join([p.strip() for p in inequality.domain_description.split(',')])} && subdomain1, {' && '.join([p.strip() for p in inequality.domain_description.split(',')])} && subdomain2, ...]. Hence, your output should in the form of an array
+    {output_format}
   </output_format>
 </code_editing_rules>
 """
-    res = api_call(prompt=prompt)
-    if res and res[0] == '[' and res[-1] == ']':
-        inner = res[1:-1].strip()
-        print(inner)
 
-        # Try to split into subdomain items robustly
-        items: List[str] = []
-        if '},' in inner:
-            raw_items = [s + '}' if not s.strip().endswith('}') else s for s in inner.split('},')]
-            items = [it.strip() for it in raw_items if it.strip()]
-        else:
-            # Split on commas that are followed by a '{' (common LLM format)
-            parts = re.split(r",\s*(?=\{)", inner)
-            items = [p.strip() for p in parts if p.strip()]
+    try:
+        llm_raw = api_call(prompt=prompt)
+    except Exception as exc:
+        print(f"Failed to obtain domain decomposition: {exc}")
+        return "Status unknown. Try a different setup"
 
-        # Prepare base domain as a flat list of conditions (no braces)
-        base_parts = [p.strip() for p in inequality.domain_description.strip().strip('{}').split(',') if p.strip()]
+    if not llm_raw:
+        print("LLM returned no decomposition.")
+        return "Status unknown. Try a different setup"
 
-        results = []
-        for sd in items:
-            sd_inner = sd.strip()
-            # If the subdomain echoes the base domain then '&& ...', drop the echo
-            m = re.match(r"^\{[^}]*\}\s*&&\s*(.*)$", sd_inner)
-            if m:
-                sd_inner = m.group(1).strip()
-            # If wrapped in braces, strip them to get a flat condition
-            if sd_inner.startswith('{') and sd_inner.endswith('}'):
-                sd_inner = sd_inner[1:-1]
-            # Build a single flat WL list of conditions
-            conds_combined = '{' + ', '.join(base_parts + [sd_inner]) + '}'
-            out = attempt_proof(inequality.variables, conds_combined, inequality.lhs, inequality.rhs)
-            print(f"The proof attempt in {{{sd_inner}}} : {out}")
-            results.append(out == 'It is proved')
+    llm_raw_clean = llm_raw.strip()
+    print(llm_raw_clean)
 
-        if results and all(results):
-            print('Proved everywhere')
-        
+    subdomains = _parse_subdomains(llm_raw_clean)
+    if not subdomains:
+        print("Could not parse subdomains from LLM output.")
+        return "Status unknown. Try a different setup"
+
+    success = True
+
+    for idx, entry in enumerate(subdomains, start=1):
+        tokens = [tok.strip() for tok in entry.split("&&") if tok.strip()]
+        cond_list = _dedupe_preserve(base_parts + tokens) if base_parts else _dedupe_preserve(tokens)
+        conds_str = "{" + ", ".join(cond_list) + "}"
+        result = attempt_proof(problem.variables, conds_str, problem.lhs, problem.rhs)
+        print(f"Subdomain {idx}: {entry}")
+        print(f"  Result: {result}")
+        if result != "It is proved":
+            success = False
+
+    if success:
+        print("Proved everywhere")
+        return "It is proved"
+
+    print("Not proved on at least one subdomain")
+    return "Status unknown. Try a different setup"
 
 
-
-    
-if __name__ == "__main__":
-    try_and_prove(inequality_1)
-
-    
-#witnessBigO[{vars_code}, {conds_code}, {lhs_wl}, {rhs_wl}, {c}]
+__all__ = [
+    "inequality",
+    "try_and_prove",
+    "attempt_proof",
+    "wl_eval",
+    "wl_eval_json",
+    "wl_bool",
+]

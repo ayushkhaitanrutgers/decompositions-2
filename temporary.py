@@ -17,7 +17,8 @@ def _resolve_wolframscript() -> str:
 
     # Common install locations (include default Wolfram.app path on macOS)
     for p in (
-        "/Applications/Wolfram.app/Contents/MacOS/WolframScript",
+        "/Users/ayushkhaitan/Desktop/Wolfram.app/Contents/MacOS/wolframscript",
+        "/Applications/Wolfram.app/Contents/MacOS/wolframscript",
         "/usr/local/bin/wolframscript",
         "/opt/homebrew/bin/wolframscript",
     ):

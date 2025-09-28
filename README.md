@@ -52,5 +52,4 @@ decomp series series_<series number here>
 
 This invokes the flow that queries the LLM for subdomains and verifies them with Mathematica. The script prints a status such as `It is proved` when the CAS verifies the inequality under the proposed decomposition.
 
-Now there is also a website where you can put in a latex input, and you get as an output the suggest decompositions, and the result of Mathematica's attempt at proving the estimate. This website is o-forge.com
 

@@ -29,6 +29,24 @@ series_3 = series_to_bound(
     conjectured_upper_asymptotic_bound="1",
 )
 
+series_3 = series_to_bound(
+    formula="1/d^4",
+    conditions="True",
+    summation_index="d",
+    other_variables="True",
+    summation_bounds=["1", "Infinity"],
+    conjectured_upper_asymptotic_bound="1",
+)
+
+series_3 = series_to_bound(
+    formula="1/d^6",
+    conditions="True",
+    summation_index="d",
+    other_variables="True",
+    summation_bounds=["1", "Infinity"],
+    conjectured_upper_asymptotic_bound="1",
+)
+
 
 
 
@@ -65,3 +83,21 @@ inequality_4 = inequality(
     rhs = "x"
     )
 #Should return False. 
+
+inequality_4 = inequality(
+    variables = "x", 
+    domain_description = "x>1", 
+    lhs = "x^3", 
+    rhs = "x"
+    )
+#Should return False. 
+
+inequality_4 = inequality(
+    variables = "x", 
+    domain_description = "x>1", 
+    lhs = "x^51", 
+    rhs = "x"
+    )
+#Should return False. 
+
+
