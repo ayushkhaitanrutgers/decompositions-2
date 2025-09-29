@@ -151,11 +151,13 @@ def ask_llm_series(series: series_to_bound):
         logForm[label_String, expr_] := log[label <> ": " <> ToString[expr, InputForm]];
 
         {paclet_setup}
+        
+        termsOfSum[expr_] := 
+        Module[{{e = Expand[expr]}}, If[Head[e] === Plus, List @@ e, {{e}}]];
 
         LeadingSummand[sum_, assum_] := 
         Module[{{terms, vars, dominatesQ, winners}}, 
-        terms = DeleteCases[List @@ Expand[sum], 0];
-        If[! ListQ[terms], terms = {{terms}}];
+        terms = DeleteCases[termsOfSum[sum], 0];
         If[terms === {{}}, Return[0]];
         If[Length[terms] == 1, Return[First[terms]]];
         vars = Variables[{{sum, assum}}];
@@ -176,8 +178,7 @@ def ask_llm_series(series: series_to_bound):
 
         LeastSummand[sum_, assum_] := 
         Module[{{terms, vars, leastQ, winners}}, 
-        terms = DeleteCases[List @@ Expand[sum], 0];
-        If[! ListQ[terms], terms = {{terms}}];
+        terms = DeleteCases[termsOfSum[sum], 0];
         If[terms === {{}}, Return[0]];
         If[Length[terms] == 1, Return[First[terms]]];
         vars = Variables[{{sum, assum}}];

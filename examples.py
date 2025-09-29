@@ -29,7 +29,7 @@ series_3 = series_to_bound(
     conjectured_upper_asymptotic_bound="1",
 )
 
-series_3 = series_to_bound(
+series_4 = series_to_bound(
     formula="1/d^4",
     conditions="True",
     summation_index="d",
@@ -38,8 +38,17 @@ series_3 = series_to_bound(
     conjectured_upper_asymptotic_bound="1",
 )
 
-series_3 = series_to_bound(
+series_5 = series_to_bound(
     formula="1/d^6",
+    conditions="True",
+    summation_index="d",
+    other_variables="True",
+    summation_bounds=["1", "Infinity"],
+    conjectured_upper_asymptotic_bound="1",
+)
+
+series_6 = series_to_bound(
+    formula="1/2^d",
     conditions="True",
     summation_index="d",
     other_variables="True",
