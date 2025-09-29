@@ -48,12 +48,30 @@ series_5 = series_to_bound(
 )
 
 series_6 = series_to_bound(
-    formula="1/2^d",
+    formula="1/(2^d + a/2^d)",
+    conditions="a>=2",
+    summation_index="d",
+    other_variables="{a}",
+    summation_bounds=["-Infinity", "Infinity"],
+    conjectured_upper_asymptotic_bound="Log[a]",
+)
+
+series_7 = series_to_bound(
+    formula="2^d",
     conditions="True",
     summation_index="d",
     other_variables="True",
-    summation_bounds=["1", "Infinity"],
+    summation_bounds=["-Infinity", "-1"],
     conjectured_upper_asymptotic_bound="1",
+)
+
+series_8 = series_to_bound(
+    formula="1/(2^n + a/2^n)",
+    conditions="a>=2",
+    summation_index="n",
+    other_variables="{a}",
+    summation_bounds=["-Infinity", "Infinity"],
+    conjectured_upper_asymptotic_bound="Log[a]",
 )
 
 

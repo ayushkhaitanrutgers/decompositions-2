@@ -202,6 +202,5 @@ def try_and_prove(inequality: inequality):
 
     
 if __name__ == "__main__":
-    try_and_prove(inequality_1)
-
+    print('hello')
     

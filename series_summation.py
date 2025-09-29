@@ -76,12 +76,53 @@ class series_to_bound:
     
 
 def ask_llm_series(series: series_to_bound):
+    
+    if series.summation_bounds[0][0]=='-' and series.summation_bounds[1][0]=='-':
+        series_temp = series_to_bound(
+            formula=series.formula.replace('d','-d'),
+            conditions=series.conditions,
+            summation_index=series.summation_index,
+            other_variables=series.other_variables,
+            summation_bounds=[series.summation_bounds[1][1:], series.summation_bounds[0][1:]],
+            conjectured_upper_asymptotic_bound=series.conjectured_upper_asymptotic_bound,
+        )
+        
+        ask_llm_series(series_temp)
+        return
+        
+    if series.summation_bounds[0][0]=='-' and not series.summation_bounds[1][0]=='-':
+        series_temp_1 = series_to_bound(
+            formula=series.formula.replace('d','-d'),
+            conditions=series.conditions,
+            summation_index=series.summation_index,
+            other_variables=series.other_variables,
+            summation_bounds=["0", series.summation_bounds[0][1:]],
+            conjectured_upper_asymptotic_bound=series.conjectured_upper_asymptotic_bound,
+        )
+        
+        series_temp_2 = series_to_bound(
+            formula=series.formula,
+            conditions=series.conditions,
+            summation_index=series.summation_index,
+            other_variables=series.other_variables,
+            summation_bounds=["0", series.summation_bounds[1]],
+            conjectured_upper_asymptotic_bound=series.conjectured_upper_asymptotic_bound,
+        )
+        print('First we prove the estimate for the negative part of the series')
+        ask_llm_series(series_temp_1)
+        print('Now we prove the estimate for the positive part of the series')
+        ask_llm_series(series_temp_2)
+        return
+        
+        
+
+    
     prompt = f"""<code_editing_rules>
     <guiding_principles>
         – Be precise; avoid conflicting or circular instructions.
         – Choose “natural” breakpoint scales where the term behavior changes (e.g., dominance switches, monotonicity kicks in, easy comparison with p-series/geometric/integral bounds).
         – Minimize the number of breakpoints while ensuring the final bound is straightforward on each subrange.
-        – Cover the full index range from 0 to Infinity, with nonoverlapping, contiguous subranges.
+        – Cover the full index range from {series.summation_bounds[0]} to {series.summation_bounds[1]}, with nonoverlapping, contiguous subranges.
         – Do not use Floor[]/Ceiling[], etc. Just return the values as natural algebraic expressions. Also, algebraically simplify everything. For example, Sqrt[a^2] can be written as a. Assume everything is positive.
         – Breakpoints may depend only on constants/parameters that appear in the series description.
         – Use only Mathematica-parsable expressions for breakpoints, built from numbers, parameters, +, -, *, /, ^, Log[], Exp[], Sqrt[].
@@ -105,7 +146,7 @@ def ask_llm_series(series: series_to_bound):
 
     <requirements_for_breakpoints>
         – Start at 0 and end at Infinity.
-        – Strictly nondecreasing: 0 <= d_1 <= … <= d_n < Infinity.
+        – Strictly nondecreasing: {series.summation_bounds[0]} <= d_1 <= … <= d_n < {series.summation_bounds[1]}.
         – Each d_i must be a closed-form expression in the series parameters (if any), using only the allowed constructors above.
         – Prefer canonical scales (e.g., powers/roots of parameters, thresholds defined by equating dominant terms) that make comparisons immediate. Also, algebraically simplify the break points as possible.
         – Keep the list as short as possible while preserving triviality of the bound on each subrange.
@@ -226,11 +267,11 @@ def ask_llm_series(series: series_to_bound):
 
         createAssums[baseAssums_, points_] := 
         Module[{{p}}, p = Partition[points, 2, 1];
-        baseAssums && d > #[[1]] && d < #[[2]] & /@ p];
+        baseAssums && {series.summation_index} > #[[1]] && {series.summation_index} < #[[2]] & /@ p];
 
         calculateEstimates[expr_, baseAssums_, points_] := 
         Module[{{assums, part}}, assums = createAssums[baseAssums, points];
-        part = Prepend[#, d] & /@ Partition[points, 2, 1];
+        part = Prepend[#, {series.summation_index}] & /@ Partition[points, 2, 1];
         log["\n== Verification run =="]; 
         logForm["Formula", expr];
         logForm["Base assumptions", baseAssums];
