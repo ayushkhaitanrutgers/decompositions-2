@@ -108,9 +108,9 @@ def ask_llm_series(series: series_to_bound):
             summation_bounds=["0", series.summation_bounds[1]],
             conjectured_upper_asymptotic_bound=series.conjectured_upper_asymptotic_bound,
         )
-        print('First we prove the estimate for the negative part of the series')
+        print(f"First we prove the estimate for the negative part of the series in the range [{series.summation_bounds[0]},0]")
         ask_llm_series(series_temp_1)
-        print('Now we prove the estimate for the positive part of the series')
+        print(f"Now we prove the estimate for the positive part of the series in the range [0,{series.summation_bounds[1]}]")
         ask_llm_series(series_temp_2)
         return
         
