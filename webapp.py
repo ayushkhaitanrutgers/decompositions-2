@@ -17,6 +17,107 @@ from mathematica_export import inequality
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
+def _latexize_expr(expr: str) -> str:
+    if not expr:
+        return ""
+    out = expr
+    # Order replacements from most specific to least specific.
+    replacements = (
+        ("-Infinity", r"-\\infty"),
+        ("Infinity", r"\\infty"),
+        (">=", r"\\ge "),
+        ("<=", r"\\le "),
+        ("!=" , r"\\ne "),
+        ("&&", r"\\land "),
+        ("*", r"\\cdot "),
+        ("Exp", r"\\exp"),
+        ("Log", r"\\log"),
+    )
+    for old, new in replacements:
+        out = out.replace(old, new)
+    return out
+
+
+def _series_preview_text(obj: series_to_bound) -> str:
+    bounds = list(obj.summation_bounds) if isinstance(obj.summation_bounds, list) else []
+    if len(bounds) < 2:
+        bounds = (bounds + ["?"] * 2)[:2]
+    lower = _latexize_expr(bounds[0])
+    upper = _latexize_expr(bounds[1])
+    formula = _latexize_expr(obj.formula)
+    bound = _latexize_expr(obj.conjectured_upper_asymptotic_bound)
+    conditions = (obj.conditions or "").strip()
+    if not conditions:
+        conditions = "True"
+    cond_display = conditions
+    if conditions not in ("True",):
+        cond_display = f"${_latexize_expr(conditions)}$"
+    return (
+        f"$\\sum_{{{obj.summation_index}={lower}}}^{{{upper}}} {formula} \\ll {bound}$, "
+        f"bounds: {cond_display}"
+    )
+
+
+def _inequality_preview_text(obj: inequality) -> str:
+    lhs = _latexize_expr(obj.lhs)
+    rhs = _latexize_expr(obj.rhs)
+    domain = getattr(obj, "domain_description", "") or "True"
+    domain = domain.strip()
+    if not domain:
+        domain = "True"
+    if domain in ("True",):
+        domain_part = "True"
+    else:
+        domain_part = f"${_latexize_expr(domain)}$"
+    return f"${lhs} \\le {rhs}$, domain: {domain_part}"
+
+
+def _series_payload(obj: series_to_bound) -> Dict[str, Any]:
+    return {
+        "parsed": {
+            "formula": obj.formula,
+            "conditions": obj.conditions,
+            "summation_index": obj.summation_index,
+            "other_variables": obj.other_variables,
+            "summation_bounds": obj.summation_bounds,
+            "conjectured_upper_asymptotic_bound": obj.conjectured_upper_asymptotic_bound,
+        },
+        "parsed_repr": (
+            "series_to_bound(\n"
+            f"    formula=\"{obj.formula}\",\n"
+            f"    conditions=\"{obj.conditions}\",\n"
+            f"    summation_index=\"{obj.summation_index}\",\n"
+            f"    other_variables=\"{obj.other_variables}\",\n"
+            f"    summation_bounds={obj.summation_bounds},\n"
+            f"    conjectured_upper_asymptotic_bound=\"{obj.conjectured_upper_asymptotic_bound}\"\n"
+            ")"
+        ),
+        "preview": _series_preview_text(obj),
+    }
+
+
+def _inequality_payload(vars_s: str, domain_s: str, lhs: str, rhs: str) -> Dict[str, Any]:
+    return {
+        "parsed": {
+            "variables": vars_s,
+            "domain_description": domain_s,
+            "lhs": lhs,
+            "rhs": rhs,
+        },
+        "parsed_repr": (
+            "inequality(\n"
+            f"    variables=\"{vars_s}\",\n"
+            f"    domain_description=\"{domain_s}\",\n"
+            f"    lhs=\"{lhs}\",\n"
+            f"    rhs=\"{rhs}\"\n"
+            ")"
+        ),
+        "preview": _inequality_preview_text(
+            inequality(variables=vars_s, domain_description=domain_s, lhs=lhs, rhs=rhs)
+        ),
+    }
+
+
 @lru_cache()
 def _collect_examples() -> List[Dict[str, Any]]:
     """Inspect examples.py and build a metadata list for the frontend."""
@@ -30,6 +131,7 @@ def _collect_examples() -> List[Dict[str, Any]]:
         if name.startswith("_"):
             continue
         if isinstance(obj, series_to_bound):
+            payload = _series_payload(obj)
             bounds = obj.summation_bounds if isinstance(obj.summation_bounds, list) else ["?", "?"]
             summary = (
                 f"Sum_{obj.summation_index}={bounds[0]}..{bounds[1]} of {obj.formula}"
@@ -43,17 +145,20 @@ def _collect_examples() -> List[Dict[str, Any]]:
                     "type": "series",
                     "cmd": "series",
                     "summary": summary,
-                    "details": {
-                        "conditions": obj.conditions,
-                        "other_variables": obj.other_variables,
-                        "conjectured_upper_asymptotic_bound": obj.conjectured_upper_asymptotic_bound,
-                    },
+                    "details": payload["parsed"],
+                    "preview": payload["preview"],
                 }
             )
         elif isinstance(obj, inequality):
             summary = f"Prove {obj.lhs} <= {obj.rhs}"
             if getattr(obj, "domain_description", ""):
                 summary += f" for {obj.domain_description}"
+            payload = _inequality_payload(
+                getattr(obj, "variables", ""),
+                getattr(obj, "domain_description", ""),
+                obj.lhs,
+                obj.rhs,
+            )
             entries.append(
                 {
                     "name": name,
@@ -61,10 +166,8 @@ def _collect_examples() -> List[Dict[str, Any]]:
                     "type": "inequality",
                     "cmd": "prove",
                     "summary": summary,
-                    "details": {
-                        "variables": getattr(obj, "variables", ""),
-                        "domain_description": getattr(obj, "domain_description", ""),
-                    },
+                    "details": payload["parsed"],
+                    "preview": payload["preview"],
                 }
             )
     return entries
@@ -512,6 +615,7 @@ INDEX_HTML = """
       const state = {
         selectedExample: null,
       };
+      const textarea = document.getElementById('text');
 
       function escapeHtml(value) {
         return String(value || '')
@@ -631,7 +735,10 @@ INDEX_HTML = """
           }
           updateStatus('parsed-status', label ? `Ran ${label}` : 'Completed');
           updateStatus('output-status', 'Completed');
-          document.getElementById('parsed').textContent = data.parsed_repr || JSON.stringify(data.parsed, null, 2);
+          const parsedSegments = [];
+          if (data.parsed_repr) parsedSegments.push(data.parsed_repr);
+          if (data.parsed) parsedSegments.push(JSON.stringify(data.parsed, null, 2));
+          document.getElementById('parsed').textContent = parsedSegments.length ? parsedSegments.join('\n\n') : '(none)';
           document.getElementById('output').textContent = data.output || '(no output)';
         } catch (err) {
           updateStatus('parsed-status', 'Error', 'error');
@@ -646,12 +753,13 @@ INDEX_HTML = """
         highlightCard(cardEl);
         setKind(example.type);
         const label = example.label || example.name;
+        textarea.value = example.preview || '';
         await executeRequest({ mode: 'by_name', cmd: example.cmd, name: example.name, kind: example.type }, label);
       }
 
       async function runManual() {
         clearSelectionHighlight();
-        const text = document.getElementById('text').value;
+        const text = textarea.value;
         const kind = getKind();
         state.selectedExample = null;
         await executeRequest({ text, kind }, 'Manual input');
@@ -726,9 +834,36 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
         )
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Execution failed: {proc.stderr.strip()}")
+
+        parsed_payload: Optional[Dict[str, Any]] = None
+        parsed_repr: Optional[str] = None
+        preview_text: Optional[str] = None
+        try:
+            import examples as examples_mod
+
+            obj = getattr(examples_mod, req.name, None)
+            if isinstance(obj, series_to_bound):
+                payload = _series_payload(obj)
+                parsed_payload = payload["parsed"]
+                parsed_repr = payload["parsed_repr"]
+                preview_text = payload["preview"]
+            elif isinstance(obj, inequality):
+                payload = _inequality_payload(
+                    getattr(obj, "variables", ""),
+                    getattr(obj, "domain_description", ""),
+                    obj.lhs,
+                    obj.rhs,
+                )
+                parsed_payload = payload["parsed"]
+                parsed_repr = payload["parsed_repr"]
+                preview_text = payload["preview"]
+        except Exception:
+            parsed_payload = parsed_payload or None
+
         return JSONResponse({
-            "parsed": None,
-            "parsed_repr": None,
+            "parsed": parsed_payload,
+            "parsed_repr": parsed_repr,
+            "preview": preview_text,
             "output": (proc.stderr or "") + (proc.stdout or ""),
         })
 
@@ -742,31 +877,15 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
             series = parse_series_smart(text)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Series parse failed: {e}")
-
-        parsed_repr = (
-            "series_to_bound(\n"
-            f"    formula=\"{series.formula}\",\n"
-            f"    conditions=\"{series.conditions}\",\n"
-            f"    summation_index=\"{series.summation_index}\",\n"
-            f"    other_variables=\"{series.other_variables}\",\n"
-            f"    summation_bounds={series.summation_bounds},\n"
-            f"    conjectured_upper_asymptotic_bound=\"{series.conjectured_upper_asymptotic_bound}\"\n"
-            ")"
-        )
+        payload = _series_payload(series)
         try:
             output = run_series(series)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
         return JSONResponse({
-            "parsed": {
-                "formula": series.formula,
-                "conditions": series.conditions,
-                "summation_index": series.summation_index,
-                "other_variables": series.other_variables,
-                "summation_bounds": series.summation_bounds,
-                "conjectured_upper_asymptotic_bound": series.conjectured_upper_asymptotic_bound,
-            },
-            "parsed_repr": parsed_repr,
+            "parsed": payload["parsed"],
+            "parsed_repr": payload["parsed_repr"],
+            "preview": payload["preview"],
             "output": output,
         })
     else:
@@ -774,26 +893,15 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
             vars_s, domain_s, lhs, rhs = parse_inequality(text)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Inequality parse failed: {e}")
-        parsed_repr = (
-            "inequality(\n"
-            f"    variables=\"{vars_s}\",\n"
-            f"    domain_description=\"{domain_s}\",\n"
-            f"    lhs=\"{lhs}\",\n"
-            f"    rhs=\"{rhs}\"\n"
-            ")"
-        )
+        payload = _inequality_payload(vars_s, domain_s, lhs, rhs)
         try:
             output = run_inequality(vars_s, domain_s, lhs, rhs)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
         return JSONResponse({
-            "parsed": {
-                "variables": vars_s,
-                "domain_description": domain_s,
-                "lhs": lhs,
-                "rhs": rhs,
-            },
-            "parsed_repr": parsed_repr,
+            "parsed": payload["parsed"],
+            "parsed_repr": payload["parsed_repr"],
+            "preview": payload["preview"],
             "output": output,
         })
 
