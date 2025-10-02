@@ -295,7 +295,7 @@ def ask_llm_series(series: series_to_bound):
 
         for line in result_packet.get("Logs", []):
             print(line)
-
+        print(result_packet)
         a = result_packet.get("Result")
         if a is True:
             print("All estimates verified")

@@ -110,8 +110,7 @@ def _cloud_eval(code: str) -> str:
     )
 
     with urllib.request.urlopen(request, timeout=_WOLFRAM_TIMEOUT) as response:
-        charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset).strip()
+        return response.read().decode(response.headers.get_content_charset() or "utf-8").strip()
 
 
 def _normalize_expr(expr: str) -> str:
@@ -214,7 +213,19 @@ def wl_eval_json(expr: str):
         print("[wolfram] Using local wolframscript", WOLFRAMSCRIPT, flush=True)
         cmd = [WOLFRAMSCRIPT, "-code", wrapped]
         data = subprocess.check_output(cmd, text=True, env=_clean_env()).strip()
-    return json.loads(data)
+
+    if data.strip() == "ERROR":
+        print("Not proved", flush=True)
+        # Return a sentinel structure so downstream code can continue gracefully.
+        return {"Logs": ["Wolfram returned ERROR"], "Result": False}
+
+    try:
+        return json.loads(data)
+    except json.JSONDecodeError:
+        print("Raw response from Wolfram:", repr(data), flush=True)
+        raise
+
+
 
 
 def wl_bool(expr: str) -> bool:

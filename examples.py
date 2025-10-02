@@ -74,6 +74,15 @@ series_8 = series_to_bound(
     conjectured_upper_asymptotic_bound="Log[a]",
 )
 
+series_9 = series_to_bound(
+    formula="1/d",
+    conditions="True",
+    summation_index="d",
+    other_variables="True",
+    summation_bounds=["1", "Infinity"],
+    conjectured_upper_asymptotic_bound="1",
+)
+
 
 
 
