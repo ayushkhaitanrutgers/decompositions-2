@@ -115,25 +115,24 @@ inequality_3 = inequality(
 inequality_4 = inequality(
     variables = "x", 
     domain_description = "x>1", 
+    lhs = "x^51", 
+    rhs = "x"
+    )
+#Should return False. 
+
+inequality_5 = inequality(
+    variables = "x", 
+    domain_description = "x>1", 
     lhs = "x^2", 
     rhs = "x"
     )
 #Should return False. 
 
-inequality_4 = inequality(
+inequality_6 = inequality(
     variables = "x", 
     domain_description = "x>1", 
     lhs = "x^3", 
     rhs = "x"
     )
 #Should return False. 
-
-inequality_4 = inequality(
-    variables = "x", 
-    domain_description = "x>1", 
-    lhs = "x^51", 
-    rhs = "x"
-    )
-#Should return False. 
-
 
