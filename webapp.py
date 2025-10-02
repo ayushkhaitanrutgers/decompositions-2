@@ -32,7 +32,7 @@ def _collect_examples() -> List[Dict[str, Any]]:
         if isinstance(obj, series_to_bound):
             bounds = obj.summation_bounds if isinstance(obj.summation_bounds, list) else ["?", "?"]
             summary = (
-                f"Sum_{obj.summation_index}={bounds[0]}..{bounds[1]} of {obj.formula}"
+                f"Sum_{obj.summation_index}={bounds[0]}..{bounds[1]} of {obj.formula} << {obj.conjectured_upper_asymptotic_bound} for {obj.conditions}"
                 if len(bounds) == 2
                 else f"Series in {obj.summation_index}: {obj.formula}"
             )
@@ -51,7 +51,7 @@ def _collect_examples() -> List[Dict[str, Any]]:
                 }
             )
         elif isinstance(obj, inequality):
-            summary = f"Prove {obj.lhs} <= {obj.rhs}"
+            summary = f"Prove {obj.lhs} << {obj.rhs}"
             if getattr(obj, "domain_description", ""):
                 summary += f" for {obj.domain_description}"
             entries.append(

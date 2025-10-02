@@ -10,6 +10,7 @@ series_1 = series_to_bound(
     summation_bounds=["0", "Infinity"],
     conjectured_upper_asymptotic_bound="1+Log[m^2]",
 )
+#\sum_{d=1}^{\infty} 
 
 series_2 = series_to_bound(
     formula="a/d^2",
