@@ -92,7 +92,7 @@ def ask_llm_series(series: series_to_bound):
         
     if series.summation_bounds[0][0]=='-' and not series.summation_bounds[1][0]=='-':
         series_temp_1 = series_to_bound(
-            formula=series.formula.replace('d','-d'),
+            formula=series.formula.replace('d','(-d)'),
             conditions=series.conditions,
             summation_index=series.summation_index,
             other_variables=series.other_variables,

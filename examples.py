@@ -84,6 +84,15 @@ series_9 = series_to_bound(
     conjectured_upper_asymptotic_bound="1",
 )
 
+series_10 = series_to_bound(
+    formula="Exp[-d^2/4]",
+    conditions="True",
+    summation_index="d",
+    other_variables="True",
+    summation_bounds=["-Infinity", "Infinity"],
+    conjectured_upper_asymptotic_bound="2",
+)
+
 
 
 
