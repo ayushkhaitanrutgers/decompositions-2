@@ -36,6 +36,11 @@ def _collect_examples() -> List[Dict[str, Any]]:
                 if len(bounds) == 2
                 else f"Series in {obj.summation_index}: {obj.formula}"
             )
+            manual_text = (
+                f"Consider the series: {obj.formula}, where {obj.summation_index} is summed from {bounds[0]} to {bounds[1]}. "
+                f"The domain is {obj.conditions or 'True'}. "
+                f"It should be bounded above by {obj.conjectured_upper_asymptotic_bound}."
+            )
             entries.append(
                 {
                     "name": name,
@@ -43,6 +48,7 @@ def _collect_examples() -> List[Dict[str, Any]]:
                     "type": "series",
                     "cmd": "series",
                     "summary": summary,
+                    "manual_text": manual_text,
                     "details": {
                         "conditions": obj.conditions,
                         "other_variables": obj.other_variables,
@@ -54,6 +60,18 @@ def _collect_examples() -> List[Dict[str, Any]]:
             summary = f"Prove {obj.lhs} << {obj.rhs}"
             if getattr(obj, "domain_description", ""):
                 summary += f" for {obj.domain_description}"
+            domain_desc = getattr(obj, "domain_description", "").strip()
+            if domain_desc.startswith("{") and domain_desc.endswith("}"):
+                domain_pretty = domain_desc[1:-1]
+            else:
+                domain_pretty = domain_desc
+            domain_sentence = (
+                f"Domain is {domain_pretty}." if domain_pretty and domain_pretty.lower() != "true" else "Domain is True."
+            )
+            manual_text = (
+                f"Prove {obj.lhs} << {obj.rhs}. "
+                f"{domain_sentence}"
+            )
             entries.append(
                 {
                     "name": name,
@@ -61,6 +79,7 @@ def _collect_examples() -> List[Dict[str, Any]]:
                     "type": "inequality",
                     "cmd": "prove",
                     "summary": summary,
+                    "manual_text": manual_text,
                     "details": {
                         "variables": getattr(obj, "variables", ""),
                         "domain_description": getattr(obj, "domain_description", ""),
@@ -643,6 +662,11 @@ INDEX_HTML = """
 
       async function runExample(example, cardEl) {
         state.selectedExample = example.name;
+        if (example.manual_text) {
+          document.getElementById('text').value = example.manual_text;
+        } else {
+          document.getElementById('text').value = '';
+        }
         highlightCard(cardEl);
         setKind(example.type);
         const label = example.label || example.name;
