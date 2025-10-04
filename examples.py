@@ -93,6 +93,15 @@ series_10 = series_to_bound(
     conjectured_upper_asymptotic_bound="2",
 )
 
+series_11 = series_to_bound(
+    formula="Exp[-d^2/a^2]",
+    conditions="a>1",
+    summation_index="d",
+    other_variables="{a}",
+    summation_bounds=["-Infinity", "Infinity"],
+    conjectured_upper_asymptotic_bound="a",
+)
+
 
 
 

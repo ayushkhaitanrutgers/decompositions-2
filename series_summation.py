@@ -243,9 +243,10 @@ def ask_llm_series(series: series_to_bound):
         expandPowersInProductNoNumbers[expr_] := 
         Module[{{factors}}, 
         factors = If[Head[expr] === Times, List @@ expr, {{expr}}];
-        factors = 
-            factors /. 
-            Power[base_, n_Integer?Positive] :> ConstantArray[base, n];
+        factors = Replace[factors,
+        Power[base_, n_Integer?Positive] :> ConstantArray[base, n],
+        {{1}} (* only the immediate elements of factors *)
+        ];
         factors = Flatten[factors];
         Select[factors, Not@*NumericQ]];
 
