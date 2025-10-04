@@ -595,6 +595,7 @@ INDEX_HTML = """
             <div class="example-title">${escapeHtml(item.label)}</div>
             <div class="example-summary">${escapeHtml(item.summary)}</div>
           `;
+          card.dataset.manualText = item.manual_text || '';
           card.addEventListener('click', () => runExample(item, card));
           container.appendChild(card);
         });
@@ -662,11 +663,10 @@ INDEX_HTML = """
 
       async function runExample(example, cardEl) {
         state.selectedExample = example.name;
-        if (example.manual_text) {
-          document.getElementById('text').value = example.manual_text;
-        } else {
-          document.getElementById('text').value = '';
-        }
+        const manualText = typeof example.manual_text === 'string' && example.manual_text.length
+          ? example.manual_text
+          : (cardEl && cardEl.dataset ? cardEl.dataset.manualText || '' : '');
+        document.getElementById('text').value = manualText;
         highlightCard(cardEl);
         setKind(example.type);
         const label = example.label || example.name;
@@ -729,6 +729,54 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
     if req.mode == "by_name":
         if not req.cmd or not req.name:
             raise HTTPException(status_code=400, detail="Provide cmd ('series'|'prove'|'solve') and name (e.g., series_1 or inequality_1)")
+
+        parsed = None
+        parsed_repr = None
+        obj = None
+        try:
+            import importlib
+            examples_mod = importlib.import_module('examples')
+            obj = getattr(examples_mod, req.name, None)
+        except Exception:
+            obj = None
+
+        if isinstance(obj, series_to_bound):
+            bounds = obj.summation_bounds if isinstance(obj.summation_bounds, list) else list(obj.summation_bounds)
+            parsed = {
+                "formula": obj.formula,
+                "conditions": obj.conditions,
+                "summation_index": obj.summation_index,
+                "other_variables": obj.other_variables,
+                "summation_bounds": bounds,
+                "conjectured_upper_asymptotic_bound": obj.conjectured_upper_asymptotic_bound,
+            }
+            parsed_repr = (
+                "series_to_bound(\n"
+                f"    formula=\"{obj.formula}\",\n"
+                f"    conditions=\"{obj.conditions}\",\n"
+                f"    summation_index=\"{obj.summation_index}\",\n"
+                f"    other_variables=\"{obj.other_variables}\",\n"
+                f"    summation_bounds={bounds},\n"
+                f"    conjectured_upper_asymptotic_bound=\"{obj.conjectured_upper_asymptotic_bound}\"\n"
+                ")"
+            )
+        elif isinstance(obj, inequality):
+            domain = getattr(obj, 'domain_description', '')
+            parsed = {
+                "variables": getattr(obj, 'variables', ''),
+                "domain_description": domain,
+                "lhs": getattr(obj, 'lhs', ''),
+                "rhs": getattr(obj, 'rhs', ''),
+            }
+            parsed_repr = (
+                "inequality(\n"
+                f"    variables=\"{parsed['variables']}\",\n"
+                f"    domain_description=\"{domain}\",\n"
+                f"    lhs=\"{parsed['lhs']}\",\n"
+                f"    rhs=\"{parsed['rhs']}\"\n"
+                ")"
+            )
+
         env = os.environ.copy()
         existing = env.get("PYTHONPATH", "")
         path_parts = [str(PROJECT_ROOT)]
@@ -751,8 +799,8 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Execution failed: {proc.stderr.strip()}")
         return JSONResponse({
-            "parsed": None,
-            "parsed_repr": None,
+            "parsed": parsed,
+            "parsed_repr": parsed_repr,
             "output": (proc.stderr or "") + (proc.stdout or ""),
         })
 
