@@ -260,11 +260,27 @@ def parse_series_text(text: str) -> series_to_bound:
 
 
 def parse_series_smart(text: str) -> series_to_bound:
-    """Prefer deterministic parse; fall back to LLM if needed."""
+    """Prefer deterministic parses (LaTeX / template) and fall back to LLM if needed."""
+    errors = []
+
+    lowered = text.lower()
+    latex_hints = ("\\sum", "∑", "sum_{", "sum^", "sum[")
+    if any(h in lowered for h in latex_hints):
+        try:
+            return parse_series_latex(text)
+        except Exception as exc:
+            errors.append(f"latex parser failed: {exc}")
+
     try:
         return parse_series_text(text)
-    except Exception:
+    except Exception as exc:
+        errors.append(f"text parser failed: {exc}")
+
+    try:
         return parse_series(text)
+    except Exception as exc:
+        errors.append(f"llm parser failed: {exc}")
+        raise ValueError("; ".join(errors)) from exc
 
 
 def demo_from_prompt() -> None:
@@ -681,7 +697,11 @@ def parse_series_latex(text: str) -> series_to_bound:
             conds = " && ".join(cond_pieces)
     # Allow empty bounds if nothing was found
     if conds is None or other_vars is None:
-        conds = ""
+        conds = "True"
+        other_vars = "{}"
+    if not conds.strip():
+        conds = "True"
+    if not other_vars.strip():
         other_vars = "{}"
 
     return series_to_bound(
