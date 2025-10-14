@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from experiments import parse_series_smart, parse_inequality, classify_problem_kind
+from llm_client import generate_text
 from series_summation import series_to_bound
 from mathematica_export import inequality
 
@@ -520,6 +521,13 @@ INDEX_HTML = """
         </section>
         <section class="card">
           <div class="results-header">
+            <h2>Summary</h2>
+            <span class="status-label" id="summary-status">Idle</span>
+          </div>
+          <pre id="summary" class="muted">(none)</pre>
+        </section>
+        <section class="card">
+          <div class="results-header">
             <h2>Run Output</h2>
             <span class="status-label" id="output-status">Idle</span>
           </div>
@@ -632,8 +640,10 @@ INDEX_HTML = """
         }
 
         updateStatus('parsed-status', 'Running...', 'running');
+        updateStatus('summary-status', 'Running...', 'running');
         updateStatus('output-status', 'Running...', 'running');
         document.getElementById('parsed').textContent = '(running...)';
+        document.getElementById('summary').textContent = '(running...)';
         document.getElementById('output').textContent = '';
 
         try {
@@ -645,19 +655,25 @@ INDEX_HTML = """
           const data = await res.json();
           if (!res.ok) {
             updateStatus('parsed-status', 'Error', 'error');
+            updateStatus('summary-status', 'Error', 'error');
             updateStatus('output-status', 'Error', 'error');
             document.getElementById('parsed').textContent = 'Error: ' + (data.detail || res.statusText);
+            document.getElementById('summary').textContent = '(none)';
             document.getElementById('output').textContent = '';
             return;
           }
           updateStatus('parsed-status', label ? `Ran ${label}` : 'Completed');
+          updateStatus('summary-status', data.summary ? 'Completed' : 'Unavailable');
           updateStatus('output-status', 'Completed');
           document.getElementById('parsed').textContent = data.parsed_repr || JSON.stringify(data.parsed, null, 2);
+          document.getElementById('summary').textContent = data.summary || 'Summary unavailable.';
           document.getElementById('output').textContent = data.output || '(no output)';
         } catch (err) {
           updateStatus('parsed-status', 'Error', 'error');
+          updateStatus('summary-status', 'Error', 'error');
           updateStatus('output-status', 'Error', 'error');
           document.getElementById('parsed').textContent = 'Request failed: ' + err;
+          document.getElementById('summary').textContent = '(none)';
           document.getElementById('output').textContent = '';
         }
       }
@@ -741,7 +757,9 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
         except Exception:
             obj = None
 
+        problem_kind = None
         if isinstance(obj, series_to_bound):
+            problem_kind = "series"
             bounds = obj.summation_bounds if isinstance(obj.summation_bounds, list) else list(obj.summation_bounds)
             parsed = {
                 "formula": obj.formula,
@@ -762,6 +780,7 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
                 ")"
             )
         elif isinstance(obj, inequality):
+            problem_kind = "inequality"
             domain = getattr(obj, 'domain_description', '')
             parsed = {
                 "variables": getattr(obj, 'variables', ''),
@@ -799,10 +818,13 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
         )
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Execution failed: {proc.stderr.strip()}")
+        combined_output = (proc.stderr or "") + (proc.stdout or "")
+        summary = summarize_run(problem_kind or (req.kind or "unknown"), parsed_repr, combined_output)
         return JSONResponse({
             "parsed": parsed,
             "parsed_repr": parsed_repr,
-            "output": (proc.stderr or "") + (proc.stdout or ""),
+            "output": combined_output,
+            "summary": summary,
         })
 
     text = (req.text or "").strip()
@@ -892,6 +914,7 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
                 output = run_series(series_obj)
             except Exception as exc:
                 raise HTTPException(status_code=500, detail=f"Execution failed: {exc}")
+            summary = summarize_run("series", parsed_repr, output)
             return JSONResponse({
                 "parsed": {
                     "formula": series_obj.formula,
@@ -903,6 +926,7 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
                 },
                 "parsed_repr": parsed_repr,
                 "output": output,
+                "summary": summary,
             })
         if kind == "inequality" and _parse_inequality():
             vars_s, domain_s, lhs, rhs = inequality_obj
@@ -918,6 +942,7 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
                 output = run_inequality(vars_s, domain_s, lhs, rhs)
             except Exception as exc:
                 raise HTTPException(status_code=500, detail=f"Execution failed: {exc}")
+            summary = summarize_run("inequality", parsed_repr, output)
             return JSONResponse({
                 "parsed": {
                     "variables": vars_s,
@@ -927,6 +952,7 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
                 },
                 "parsed_repr": parsed_repr,
                 "output": output,
+                "summary": summary,
             })
 
     detail_parts: List[str] = []
@@ -945,3 +971,80 @@ def main():
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
     uvicorn.run("webapp:app", host=host, port=port, reload=False)
+SUMMARY_SYSTEM = (
+    "You review logs from a mathematical decomposition tool. "
+    "Summaries must be concise (<=2 sentences), reflect success or failure, and mention the reason when available. "
+    "Respond with plain text; no markdown bullets or headings."
+)
+
+
+def summarize_run(kind: str, parsed_repr: Optional[str], output: str) -> str:
+    """Generate a short natural-language summary of the computation outcome."""
+    def _fallback_summary() -> Optional[str]:
+        text = output.strip()
+        if not text:
+            return None
+        lower = text.lower()
+        success_markers = (
+            "resolve results: {true}",
+            "result: true",
+            "result: it is proved",
+            "proved everywhere",
+            "all estimates verified",
+            "verification succeeded",
+        )
+        failure_markers = (
+            "resolve results: {false}",
+            "result: false",
+            "unable to prove",
+            "verification failed",
+            "execution failed",
+            "error:",
+            "not proved",
+            "not verified",
+            "wolfram returned error",
+        )
+        if any(marker in lower for marker in success_markers):
+            if kind == "series":
+                return "Verification succeeded; the series bound holds."
+            if kind == "inequality":
+                return "Verification succeeded; the inequality holds."
+            return "Verification succeeded."
+        if any(marker in lower for marker in failure_markers):
+            if kind == "series":
+                return "O-Forge was unable to verify the proposed series bound."
+            if kind == "inequality":
+                return "O-Forge was unable to complete the inequality proof."
+            return "O-Forge was unable to complete the proof."
+        return None
+
+    prompt_lines = [
+        f"Problem type: {kind or 'unknown'}",
+    ]
+    if parsed_repr:
+        prompt_lines.append("Object specification:")
+        prompt_lines.append(parsed_repr)
+    prompt_lines.append("")
+    prompt_lines.append("Tool log:")
+    prompt_lines.append(output.strip() or "(empty output)")
+    prompt_lines.append("")
+    prompt_lines.append("Write one short sentence confirming success or explaining failure.")
+    prompt = "\n".join(prompt_lines)
+    try:
+        summary = generate_text(
+            prompt=prompt,
+            system_instruction=SUMMARY_SYSTEM,
+            model="gemini-2.5-flash",
+            max_output_tokens=128,
+        ).strip()
+        if summary:
+            return summary
+        fallback = _fallback_summary()
+        if fallback:
+            return fallback
+        return "O-Forge was unable to summarize the result."
+    except Exception as exc:  # pragma: no cover - defensive
+        fallback = _fallback_summary()
+        if fallback:
+            return fallback
+        return f"O-Forge was unable to summarize the result (error: {exc})."
