@@ -3,13 +3,13 @@ import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from experiments import parse_series_smart, parse_inequality
+from experiments import parse_series_smart, parse_inequality, classify_problem_kind
 from series_summation import series_to_bound
 from mathematica_export import inequality
 
@@ -495,7 +495,8 @@ INDEX_HTML = """
           <div class="field">
             <span style="font-weight:600; display:block; margin-bottom:0.4rem;">Mode</span>
             <div class="radio-group" id="kind-group">
-              <label data-kind="series" class="active"><input type="radio" name="kind" value="series" checked />Series</label>
+              <label data-kind="auto" class="active"><input type="radio" name="kind" value="auto" checked />Auto</label>
+              <label data-kind="series"><input type="radio" name="kind" value="series" />Series</label>
               <label data-kind="inequality"><input type="radio" name="kind" value="inequality" />Inequality</label>
             </div>
           </div>
@@ -543,7 +544,7 @@ INDEX_HTML = """
 
       function getKind() {
         const checked = document.querySelector('input[name="kind"]:checked');
-        return checked ? checked.value : 'series';
+        return checked ? checked.value : 'auto';
       }
 
       function setKind(kind) {
@@ -805,69 +806,138 @@ def api_series(req: SeriesRequest, x_auth_token: Optional[str] = Header(default=
         })
 
     text = (req.text or "").strip()
-    if req.kind in ("series", "inequality"):
-        is_series = (req.kind == "series")
-    else:
-        is_series = ("\\sum" in text) or ("Sum[" in text)
-    if is_series:
-        try:
-            series = parse_series_smart(text)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Series parse failed: {e}")
+    if not text:
+        raise HTTPException(status_code=400, detail="Provide text for parsing or use mode='by_name'.")
 
-        parsed_repr = (
-            "series_to_bound(\n"
-            f"    formula=\"{series.formula}\",\n"
-            f"    conditions=\"{series.conditions}\",\n"
-            f"    summation_index=\"{series.summation_index}\",\n"
-            f"    other_variables=\"{series.other_variables}\",\n"
-            f"    summation_bounds={series.summation_bounds},\n"
-            f"    conjectured_upper_asymptotic_bound=\"{series.conjectured_upper_asymptotic_bound}\"\n"
-            ")"
-        )
+    def _normalize_kind(kind: Optional[str]) -> Optional[str]:
+        if not kind:
+            return None
+        value = kind.strip().lower()
+        if value in ("series", "inequality"):
+            return value
+        if value == "auto":
+            return None
+        return None
+
+    selected_kind = _normalize_kind(req.kind)
+    classification_error: Optional[str] = None
+
+    if selected_kind is None:
         try:
-            output = run_series(series)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
-        return JSONResponse({
-            "parsed": {
-                "formula": series.formula,
-                "conditions": series.conditions,
-                "summation_index": series.summation_index,
-                "other_variables": series.other_variables,
-                "summation_bounds": series.summation_bounds,
-                "conjectured_upper_asymptotic_bound": series.conjectured_upper_asymptotic_bound,
-            },
-            "parsed_repr": parsed_repr,
-            "output": output,
-        })
+            selected_kind = classify_problem_kind(text)
+        except Exception as exc:
+            classification_error = str(exc)
+            selected_kind = None
+
+    def _prefer_series_from_heuristics(s: str) -> bool:
+        lowered = s.lower()
+        series_hints = ("\\sum", "sum[", "∑", "series", "summed from", "partial sum", "sigma")
+        inequality_hints = ("<<", "\\ll", "≪", "<=", ">=", "<", ">", "≤", "≥")
+        if any(tok in lowered for tok in series_hints):
+            # If both hints appear, lean toward series
+            if any(tok in lowered for tok in inequality_hints):
+                return True
+            return True
+        if any(tok in lowered for tok in inequality_hints):
+            return False
+        return False
+
+    parse_errors: Dict[str, str] = {}
+    series_obj: Optional[series_to_bound] = None
+    inequality_obj: Optional[Tuple[str, str, str, str]] = None
+
+    def _parse_series() -> bool:
+        nonlocal series_obj
+        if series_obj is not None:
+            return True
+        try:
+            series_obj = parse_series_smart(text)
+            return True
+        except Exception as exc:
+            parse_errors["series"] = str(exc)
+            return False
+
+    def _parse_inequality() -> bool:
+        nonlocal inequality_obj
+        if inequality_obj is not None:
+            return True
+        try:
+            inequality_obj = parse_inequality(text)
+            return True
+        except Exception as exc:
+            parse_errors["inequality"] = str(exc)
+            return False
+
+    order: List[str] = []
+    if selected_kind == "series":
+        order = ["series", "inequality"]
+    elif selected_kind == "inequality":
+        order = ["inequality", "series"]
     else:
-        try:
-            vars_s, domain_s, lhs, rhs = parse_inequality(text)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Inequality parse failed: {e}")
-        parsed_repr = (
-            "inequality(\n"
-            f"    variables=\"{vars_s}\",\n"
-            f"    domain_description=\"{domain_s}\",\n"
-            f"    lhs=\"{lhs}\",\n"
-            f"    rhs=\"{rhs}\"\n"
-            ")"
-        )
-        try:
-            output = run_inequality(vars_s, domain_s, lhs, rhs)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
-        return JSONResponse({
-            "parsed": {
-                "variables": vars_s,
-                "domain_description": domain_s,
-                "lhs": lhs,
-                "rhs": rhs,
-            },
-            "parsed_repr": parsed_repr,
-            "output": output,
-        })
+        order = ["series", "inequality"] if _prefer_series_from_heuristics(text) else ["inequality", "series"]
+
+    for kind in order:
+        if kind == "series" and _parse_series():
+            parsed_repr = (
+                "series_to_bound(\n"
+                f"    formula=\"{series_obj.formula}\",\n"
+                f"    conditions=\"{series_obj.conditions}\",\n"
+                f"    summation_index=\"{series_obj.summation_index}\",\n"
+                f"    other_variables=\"{series_obj.other_variables}\",\n"
+                f"    summation_bounds={series_obj.summation_bounds},\n"
+                f"    conjectured_upper_asymptotic_bound=\"{series_obj.conjectured_upper_asymptotic_bound}\"\n"
+                ")"
+            )
+            try:
+                output = run_series(series_obj)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Execution failed: {exc}")
+            return JSONResponse({
+                "parsed": {
+                    "formula": series_obj.formula,
+                    "conditions": series_obj.conditions,
+                    "summation_index": series_obj.summation_index,
+                    "other_variables": series_obj.other_variables,
+                    "summation_bounds": series_obj.summation_bounds,
+                    "conjectured_upper_asymptotic_bound": series_obj.conjectured_upper_asymptotic_bound,
+                },
+                "parsed_repr": parsed_repr,
+                "output": output,
+            })
+        if kind == "inequality" and _parse_inequality():
+            vars_s, domain_s, lhs, rhs = inequality_obj
+            parsed_repr = (
+                "inequality(\n"
+                f"    variables=\"{vars_s}\",\n"
+                f"    domain_description=\"{domain_s}\",\n"
+                f"    lhs=\"{lhs}\",\n"
+                f"    rhs=\"{rhs}\"\n"
+                ")"
+            )
+            try:
+                output = run_inequality(vars_s, domain_s, lhs, rhs)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Execution failed: {exc}")
+            return JSONResponse({
+                "parsed": {
+                    "variables": vars_s,
+                    "domain_description": domain_s,
+                    "lhs": lhs,
+                    "rhs": rhs,
+                },
+                "parsed_repr": parsed_repr,
+                "output": output,
+            })
+
+    detail_parts: List[str] = []
+    if classification_error:
+        detail_parts.append(f"Classifier error: {classification_error}")
+    if parse_errors:
+        for label, err in parse_errors.items():
+            detail_parts.append(f"{label.capitalize()} parser error: {err}")
+    if not detail_parts:
+        detail_parts.append("Unable to parse input as a series or inequality.")
+    raise HTTPException(status_code=400, detail="; ".join(detail_parts))
 
 
 def main():

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Literal
 
 from llm_client import api_call, generate_text
 from series_summation import series_to_bound
@@ -32,6 +32,58 @@ def _extract_json(text: str) -> Dict[str, Any]:
         raise ValueError("No JSON object found in model output")
     s = m.group(0)
     return json.loads(s)
+
+
+_CLASSIFIER_SYSTEM = (
+    "You classify mathematical prompts for a decomposition tool. "
+    "Always respond with compact JSON containing a single key 'kind'. "
+    "Valid values are the lowercase strings 'series' or 'inequality'."
+)
+
+
+def classify_problem_kind(text: str, *, model: str = "gemini-2.5-flash") -> Literal["series", "inequality"]:
+    """Use the LLM to decide whether the prompt describes a series or an inequality.
+
+    The prompt provides extensive guidance so that sum descriptions with bounds
+    (e.g., using `<<`) are still tagged as series.
+    """
+
+    prompt = (
+        "Return ONLY JSON of the form {\"kind\":\"series\"} or {\"kind\":\"inequality\"}.\n"
+        "\n"
+        "Interpretation rules (follow strictly, prefer series when ambiguous):\n"
+        "  • SERIES: The text introduces or references a summation/series (explicit Σ, \\sum, Sum[...], \"series\", \"summed from\", etc.), or asks to bound a series against another quantity. Even if the statement also contains inequality symbols like <<, ≤, ≪, treat it as SERIES because the core object is the sum.\n"
+        "  • INEQUALITY: The text compares two expressions without describing a summation to analyze. Focus on proving or manipulating inequalities that do not hinge on evaluating a series.\n"
+        "\n"
+        "Additional guidance:\n"
+        "  • If both a series description and inequality wording appear, choose \"series\".\n"
+        "  • If the text names specific summation indices, ranges, or phrases like \"partial sums\", \"summed from\", \"series behaves like\", that is SERIES.\n"
+        "  • If the text only references functions/variables with relations (<=, >=, <<) and no sum, classify as INEQUALITY.\n"
+        "  • Do not infer a series unless it is explicit; likewise do not ignore an explicit Σ even if the main request is to bound it.\n"
+        "\n"
+        "Illustrations:\n"
+        "  1. \"Prove Sum_{n=1}^\\infty 1/n^2 << 1.\"  -> {\"kind\":\"series\"}\n"
+        "  2. \"Let f(x)=x^2. Show f(x) >= x for x >= 1.\"  -> {\"kind\":\"inequality\"}\n"
+        "  3. \"\\sum_{d=1}^{\\infty} 1/d^2 \\ll 1, domain: True\"  -> {\"kind\":\"series\"}\n"
+        "  4. \"Establish that for all positive reals a,b: (a+b)/2 >= sqrt(ab).\" -> {\"kind\":\"inequality\"}\n"
+        "\n"
+        "Text:\n"
+        f"{text}\n"
+    )
+    raw = generate_text(
+        prompt=prompt,
+        system_instruction=_CLASSIFIER_SYSTEM,
+        model=model,
+        max_output_tokens=128,
+    )
+    spec = _extract_json(raw)
+    kind = spec.get("kind", "")
+    if not isinstance(kind, str):
+        raise ValueError("Classifier returned invalid type")
+    value = kind.strip().lower()
+    if value not in ("series", "inequality"):
+        raise ValueError(f"Unexpected classifier label: {kind!r}")
+    return value  # type: ignore[return-value]
 
 
 def parse_series(text: str, *, model: str = "gemini-2.5-flash") -> series_to_bound:
