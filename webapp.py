@@ -330,6 +330,24 @@ INDEX_HTML = """
         margin: 0;
         color: var(--muted);
       }
+      .footnote {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 1.5rem 1.5rem;
+        font-size: 0.85rem;
+        color: rgba(98, 107, 123, 0.75);
+        text-align: right;
+      }
+      .footnote a {
+        color: inherit;
+        text-decoration: underline;
+        text-decoration-color: rgba(98, 107, 123, 0.4);
+        transition: color 0.15s ease, text-decoration-color 0.15s ease;
+      }
+      .footnote a:hover {
+        color: var(--accent);
+        text-decoration-color: var(--accent);
+      }
       textarea {
         width: 100%;
         min-height: 180px;
@@ -582,10 +600,13 @@ INDEX_HTML = """
             <h2>Run Output</h2>
             <span class="status-label" id="output-status">Idle</span>
           </div>
-          <pre id="output">(none)</pre>
+          <pre id="output" class="muted">(none)</pre>
         </section>
       </main>
     </div>
+    <p class="footnote">
+      Terence Tao's <a href="https://mathoverflow.net/a/463940/91878" target="_blank" rel="noopener noreferrer">MathOverflow post</a> that inspired our tool. His <a href="https://mathstodon.xyz/@tao/115379172603958618" target="_blank" rel="noopener noreferrer">post</a> about our tool.
+    </p>
 
     <script>
       const state = {
