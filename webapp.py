@@ -279,9 +279,51 @@ INDEX_HTML = """
         padding: 1.75rem;
         box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
       }
+      .card h1 {
+        margin: 0;
+        font-size: 2rem;
+      }
       .card h2 {
         margin: 0 0 0.75rem 0;
         font-size: 1.35rem;
+      }
+      .card-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+      }
+      .card-heading .credits {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.25rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+        font-family: var(--sans);
+        font-weight: 500;
+      }
+      .card-heading .credits-label {
+        font-size: 0.8rem;
+        letter-spacing: 0.01em;
+        text-transform: none;
+      }
+      .card-heading .credits-names {
+        display: flex;
+        flex-direction: column;
+        text-align: right;
+        line-height: 1.35;
+      }
+      .card-heading .credits a {
+        color: var(--muted);
+        text-decoration: none;
+        font-weight: 500;
+        transition: color 0.15s ease, text-decoration 0.15s ease;
+      }
+      .card-heading .credits a:hover {
+        color: var(--accent);
+        text-decoration: underline;
       }
       .subtitle {
         margin: 0;
@@ -484,7 +526,16 @@ INDEX_HTML = """
       </aside>
       <main class="main">
         <section class="card">
-          <h1>Decomp Workspace</h1>
+          <div class="card-heading">
+            <h1>Decomp Workspace</h1>
+            <div class="credits">
+              <span class="credits-label">Created by</span>
+              <span class="credits-names">
+                <a href="https://vganesh1.github.io/" target="_blank" rel="noopener noreferrer">Vijay Ganesh</a>
+                <a href="https://ayushkhaitanrutgers.github.io/" target="_blank" rel="noopener noreferrer">Ayush Khaitan</a>
+              </span>
+            </div>
+          </div>
           <p class="subtitle">Run decompositions on curated examples or your own expressions.</p>
         </section>
         <section class="card">
