@@ -317,9 +317,6 @@ INDEX_HTML = """
         line-height: 1.35;
         gap: 0.2rem;
       }
-      .card-heading .credits-paper {
-        margin-top: 1.0125rem;
-      }
       .card-heading .credits a {
         color: inherit;
         text-decoration: none;
@@ -327,6 +324,28 @@ INDEX_HTML = """
         transition: color 0.15s ease, text-decoration 0.15s ease;
       }
       .card-heading .credits a:hover {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+      .card-subline {
+        margin-top: 0.6rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      .card-subline .subtitle {
+        flex: 1 1 auto;
+      }
+      .card-subline .paper-link {
+        color: rgba(98, 107, 123, 0.7);
+        font-size: 0.9rem;
+        text-decoration: none;
+        font-family: var(--sans);
+        transition: color 0.15s ease, text-decoration 0.15s ease;
+      }
+      .card-subline .paper-link:hover {
         color: var(--accent);
         text-decoration: underline;
       }
@@ -555,11 +574,13 @@ INDEX_HTML = """
               <span class="credits-names">
                 <a href="https://vganesh1.github.io/" target="_blank" rel="noopener noreferrer">Vijay Ganesh</a>
                 <a href="https://ayushkhaitanrutgers.github.io/" target="_blank" rel="noopener noreferrer">Ayush Khaitan</a>
-                <span class="credits-paper"><a href="https://arxiv.org/abs/2510.12350" target="_blank" rel="noopener noreferrer">Paper</a></span>
               </span>
             </div>
           </div>
-          <p class="subtitle">Run decompositions on curated examples or your own expressions.</p>
+          <div class="card-subline">
+            <p class="subtitle">Run decompositions on curated examples or your own expressions.</p>
+            <a class="paper-link" href="https://arxiv.org/abs/2510.12350" target="_blank" rel="noopener noreferrer">Paper</a>
+          </div>
         </section>
         <section class="card">
           <h2>Manual Input</h2>
