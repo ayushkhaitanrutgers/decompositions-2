@@ -315,6 +315,10 @@ INDEX_HTML = """
         flex-direction: column;
         text-align: right;
         line-height: 1.35;
+        gap: 0.2rem;
+      }
+      .card-heading .credits-paper {
+        margin-top: 1.0125rem;
       }
       .card-heading .credits a {
         color: inherit;
@@ -551,6 +555,7 @@ INDEX_HTML = """
               <span class="credits-names">
                 <a href="https://vganesh1.github.io/" target="_blank" rel="noopener noreferrer">Vijay Ganesh</a>
                 <a href="https://ayushkhaitanrutgers.github.io/" target="_blank" rel="noopener noreferrer">Ayush Khaitan</a>
+                <span class="credits-paper"><a href="https://arxiv.org/abs/2510.12350" target="_blank" rel="noopener noreferrer">Paper</a></span>
               </span>
             </div>
           </div>
