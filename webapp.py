@@ -262,7 +262,7 @@ INDEX_HTML = """
       }
       .sidebar-header {
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-start;
         align-items: center;
         margin-bottom: 1rem;
         gap: 0.5rem;
@@ -290,8 +290,8 @@ INDEX_HTML = """
       .card-heading {
         display: flex;
         justify-content: space-between;
-        align-items: flex-end;
-        gap: 1.5rem;
+        align-items: flex-start;
+        gap: 1.25rem;
         flex-wrap: wrap;
       }
       .card-heading .credits {
@@ -300,9 +300,10 @@ INDEX_HTML = """
         align-items: flex-end;
         gap: 0.25rem;
         font-size: 0.9rem;
-        color: var(--muted);
+        color: rgba(98, 107, 123, 0.7);
         font-family: var(--sans);
-        font-weight: 500;
+        font-weight: 400;
+        margin-top: 0.25rem;
       }
       .card-heading .credits-label {
         font-size: 0.8rem;
@@ -316,9 +317,9 @@ INDEX_HTML = """
         line-height: 1.35;
       }
       .card-heading .credits a {
-        color: var(--muted);
+        color: inherit;
         text-decoration: none;
-        font-weight: 500;
+        font-weight: 400;
         transition: color 0.15s ease, text-decoration 0.15s ease;
       }
       .card-heading .credits a:hover {
@@ -518,7 +519,6 @@ INDEX_HTML = """
       <aside class="sidebar">
         <div class="sidebar-header">
           <h2>Example Library</h2>
-          <button class="ghost" id="reload-examples" type="button">Reload</button>
         </div>
         <div id="examples" class="example-list">
           <div class="empty-state" id="examples-empty">Examples load on demand. Click reload if needed.</div>
@@ -750,7 +750,6 @@ INDEX_HTML = """
       }
 
       document.getElementById('run-input').addEventListener('click', runManual);
-      document.getElementById('reload-examples').addEventListener('click', loadExamples);
 
       document.querySelectorAll('.radio-group label').forEach(label => {
         label.addEventListener('click', () => setKind(label.dataset.kind));
