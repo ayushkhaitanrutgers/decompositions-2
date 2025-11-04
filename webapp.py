@@ -548,6 +548,30 @@ INDEX_HTML = """
         color: var(--muted);
         font-size: 0.9rem;
       }
+      .video-card {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      .video-card h2 {
+        margin-bottom: 1rem;
+      }
+      .video-wrapper {
+        position: relative;
+        padding-bottom: 56.25%;
+        height: 0;
+        overflow: hidden;
+        border-radius: 0.75rem;
+        box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+        background: #000;
+      }
+      .video-wrapper iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        border-radius: inherit;
+      }
       @media (max-width: 1080px) {
         .page { flex-direction: column; }
         .sidebar { position: static; width: 100%; max-height: none; }
@@ -627,6 +651,17 @@ INDEX_HTML = """
             <span class="status-label" id="output-status">Idle</span>
           </div>
           <pre id="output" class="muted">(none)</pre>
+        </section>
+        <section class="card video-card">
+          <h2>Watch the Decomp Walkthrough</h2>
+          <div class="video-wrapper">
+            <iframe
+              src="https://www.youtube.com/embed/GaseA5B6UxA"
+              title="Decomp Workspace Walkthrough"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen
+            ></iframe>
+          </div>
         </section>
       </main>
     </div>
