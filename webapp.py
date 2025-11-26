@@ -596,14 +596,12 @@ INDEX_HTML = """
             <div class="credits">
               <span class="credits-label">Created by</span>
               <span class="credits-names">
-                <a href="https://vganesh1.github.io/" target="_blank" rel="noopener noreferrer">Vijay Ganesh</a>
-                <a href="https://ayushkhaitanrutgers.github.io/" target="_blank" rel="noopener noreferrer">Ayush Khaitan</a>
+                <a class="paper-link" href="https://arxiv.org/abs/2510.12350" target="_blank" rel="noopener noreferrer">Paper</a>
               </span>
             </div>
           </div>
           <div class="card-subline">
             <p class="subtitle">Run decompositions on curated examples or your own expressions.</p>
-            <a class="paper-link" href="https://arxiv.org/abs/2510.12350" target="_blank" rel="noopener noreferrer">Paper</a>
           </div>
         </section>
         <section class="card">
