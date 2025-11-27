@@ -594,7 +594,7 @@ INDEX_HTML = """
           <div class="card-heading">
             <h1>Decomp Workspace</h1>
             <div class="credits">
-              <span class="credits-label">Created by</span>
+              <span class="credits-label"></span>
               <span class="credits-names">
                 <a class="paper-link" href="https://arxiv.org/abs/2510.12350" target="_blank" rel="noopener noreferrer">Paper</a>
               </span>
@@ -650,17 +650,7 @@ INDEX_HTML = """
           </div>
           <pre id="output" class="muted">(none)</pre>
         </section>
-        <section class="card video-card">
-          <h2>Watch the Decomp Walkthrough</h2>
-          <div class="video-wrapper">
-            <iframe
-              src="https://www.youtube.com/embed/GaseA5B6UxA"
-              title="Decomp Workspace Walkthrough"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowfullscreen
-            ></iframe>
-          </div>
-        </section>
+
       </main>
     </div>
     <p class="footnote">
