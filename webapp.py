@@ -10,7 +10,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from experiments import parse_series_smart, parse_inequality, classify_problem_kind
-from llm_client import generate_text
 from series_summation import series_to_bound
 from mathematica_export import inequality
 
@@ -638,7 +637,7 @@ INDEX_HTML = """
         </section>
         <section class="card">
           <div class="results-header">
-            <h2>Summary</h2>
+            <h2>Run Status</h2>
             <span class="status-label" id="summary-status">Idle</span>
           </div>
           <pre id="summary" class="muted">(none)</pre>
@@ -779,7 +778,7 @@ INDEX_HTML = """
             updateStatus('summary-status', 'Error', 'error');
             updateStatus('output-status', 'Error', 'error');
             document.getElementById('parsed').textContent = 'Error: ' + (data.detail || res.statusText);
-            document.getElementById('summary').textContent = '(none)';
+            document.getElementById('summary').textContent = 'Execution failed';
             document.getElementById('output').textContent = '';
             return;
           }
@@ -794,7 +793,7 @@ INDEX_HTML = """
           updateStatus('summary-status', 'Error', 'error');
           updateStatus('output-status', 'Error', 'error');
           document.getElementById('parsed').textContent = 'Request failed: ' + err;
-          document.getElementById('summary').textContent = '(none)';
+          document.getElementById('summary').textContent = 'Execution failed';
           document.getElementById('output').textContent = '';
         }
       }
@@ -1091,80 +1090,36 @@ def main():
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8000"))
     uvicorn.run("webapp:app", host=host, port=port, reload=False)
-SUMMARY_SYSTEM = (
-    "You review logs from a mathematical decomposition tool. "
-    "Summaries must be concise (<=2 sentences), reflect success or failure, and mention the reason when available. "
-    "Respond with plain text; no markdown bullets or headings."
-)
-
-
 def summarize_run(kind: str, parsed_repr: Optional[str], output: str) -> str:
-    """Generate a short natural-language summary of the computation outcome."""
-    def _fallback_summary() -> Optional[str]:
-        text = output.strip()
-        if not text:
-            return None
-        lower = text.lower()
-        success_markers = (
-            "resolve results: {true}",
-            "result: true",
-            "result: it is proved",
-            "proved everywhere",
-            "all estimates verified",
-            "verification succeeded",
-        )
-        failure_markers = (
-            "resolve results: {false}",
-            "result: false",
-            "unable to prove",
-            "verification failed",
-            "execution failed",
-            "error:",
-            "not proved",
-            "not verified",
-            "wolfram returned error",
-        )
-        if any(marker in lower for marker in success_markers):
-            if kind == "series":
-                return "Verification succeeded; the series bound holds."
-            if kind == "inequality":
-                return "Verification succeeded; the inequality holds."
-            return "Verification succeeded."
-        if any(marker in lower for marker in failure_markers):
-            if kind == "series":
-                return "O-Forge was unable to verify the proposed series bound."
-            if kind == "inequality":
-                return "O-Forge was unable to complete the inequality proof."
-            return "O-Forge was unable to complete the proof."
-        return None
+    """Return a deterministic run status derived from the tool log."""
+    del kind, parsed_repr
 
-    prompt_lines = [
-        f"Problem type: {kind or 'unknown'}",
-    ]
-    if parsed_repr:
-        prompt_lines.append("Object specification:")
-        prompt_lines.append(parsed_repr)
-    prompt_lines.append("")
-    prompt_lines.append("Tool log:")
-    prompt_lines.append(output.strip() or "(empty output)")
-    prompt_lines.append("")
-    prompt_lines.append("Write one short sentence confirming success or explaining failure.")
-    prompt = "\n".join(prompt_lines)
-    try:
-        summary = generate_text(
-            prompt=prompt,
-            system_instruction=SUMMARY_SYSTEM,
-            model="gemini-2.5-flash",
-            max_output_tokens=128,
-        ).strip()
-        if summary:
-            return summary
-        fallback = _fallback_summary()
-        if fallback:
-            return fallback
-        return "O-Forge was unable to summarize the result."
-    except Exception as exc:  # pragma: no cover - defensive
-        fallback = _fallback_summary()
-        if fallback:
-            return fallback
-        return f"O-Forge was unable to summarize the result (error: {exc})."
+    lower = output.strip().lower()
+    if not lower:
+        return "Run status unknown"
+
+    success_markers = (
+        "resolve results: {true}",
+        "result: true",
+        "result: it is proved",
+        "proved everywhere",
+        "all estimates verified",
+        "verification succeeded",
+    )
+    failure_markers = (
+        "resolve results: {false}",
+        "result: false",
+        "unable to prove",
+        "verification failed",
+        "execution failed",
+        "error:",
+        "not proved",
+        "not verified",
+        "wolfram returned error",
+    )
+
+    if any(marker in lower for marker in success_markers):
+        return "Run succeeded"
+    if any(marker in lower for marker in failure_markers):
+        return "Run failed"
+    return "Run status unknown"
