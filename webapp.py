@@ -1115,6 +1115,7 @@ def summarize_run(kind: str, parsed_repr: Optional[str], output: str) -> str:
         "error:",
         "not proved",
         "not verified",
+        "subdomains not found",
         "wolfram returned error",
     )
 

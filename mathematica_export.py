@@ -189,6 +189,16 @@ def _parse_subdomains(raw: str) -> List[str]:
     return pieces
 
 
+def _strip_code_fences(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            inner = "\n".join(lines[1:-1]).strip()
+            return inner
+    return stripped
+
+
 def wl_eval(expr: str, form: str = "InputForm") -> str:
     """Evaluate a Wolfram Language expression and return the textual output."""
     wrapped = f'ToString[({expr}), {form}]'
@@ -291,6 +301,7 @@ def try_and_prove(problem: "inequality") -> str:
     – Use natural subdomains so the inequality proof is trivial
     – Minimize the number of subdomains while covering the whole domain
     – Output only Mathematica-parsable inequalities using <, >, <=, >=, Log[], Exp[]
+    – If no such decomposition exists, output exactly: Subdomains not found
   </guiding_principles>
 
   <task>
@@ -302,6 +313,7 @@ def try_and_prove(problem: "inequality") -> str:
 
   <output_format>
     {output_format}
+    or exactly: Subdomains not found
   </output_format>
 </code_editing_rules>
 """
@@ -317,6 +329,12 @@ def try_and_prove(problem: "inequality") -> str:
         return "Status unknown. Try a different setup"
 
     llm_raw_clean = llm_raw.strip()
+    llm_raw_inner = _strip_code_fences(llm_raw_clean)
+    no_subdomains = llm_raw_inner.lower() == "subdomains not found" or llm_raw_inner == "[]"
+    if no_subdomains:
+        print("Subdomains not found")
+        return "Subdomains not found"
+
     print(llm_raw_clean)
 
     subdomains = _parse_subdomains(llm_raw_clean)
