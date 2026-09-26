@@ -155,3 +155,40 @@ inequality_6 = inequality(
     )
 #Should return False. 
 
+
+# ---------------------------------------------------------------------------
+# Examples for the robust prover (decomp prove inequality_7, ...).
+# ---------------------------------------------------------------------------
+
+inequality_7 = inequality(
+    variables="x",
+    domain_description="x >= 1",
+    lhs="Log[x]",
+    rhs="x^(1/10)",
+)
+# True, but needs C ≈ 3.7 (C = 1 fails), so the old single Resolve call said "False".
+
+inequality_8 = inequality(
+    variables="x",
+    domain_description="x > 0",
+    lhs="Exp[x]",
+    rhs="1 + x",
+)
+# False: the ratio is unbounded.
+
+inequality_9 = inequality(
+    variables="x, y",
+    domain_description="x > 0, y > 0",
+    lhs="x*y",
+    rhs="x^2 + y^2",
+    absolute=True,
+)
+
+inequality_10 = inequality(
+    variables="x",
+    domain_description="x >= 1, eps > 0, eps < 1",
+    lhs="Log[x]",
+    rhs="x^eps",
+    parameters="eps",
+)
+# The constant must depend on eps: C = 1/eps works.

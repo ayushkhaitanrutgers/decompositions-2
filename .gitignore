@@ -5,3 +5,6 @@
 .venv/
 258.pub
 258
+__pycache__/
+.pytest_cache/
+*.egg-info/

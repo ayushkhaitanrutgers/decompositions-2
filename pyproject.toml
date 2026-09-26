@@ -21,6 +21,7 @@ py-modules = [
   "examples",
   "series_summation",
   "mathematica_export",
+  "prover",
   "llm_client",
   "shared",
   "axioms",

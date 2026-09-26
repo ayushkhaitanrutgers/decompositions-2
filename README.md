@@ -40,6 +40,83 @@ export WOLFRAMSCRIPT=/usr/local/bin/wolframscript  # example
 python mathematica_export.py
 ```
 
+## The robust prover (`prover.py` + `prover.wl`)
+
+All Mathematica work now goes through `prover.py`, which drives the kernel
+script `prover.wl`.  It answers one question:
+
+> is there a constant `C > 0` with `lhs <= C * rhs` at every point of the domain?
+
+and returns one of `proved` (with an explicit `C`), `disproved` (with a reason),
+`ill-posed` (the question itself has a problem), `error` (bad input) or `unknown`.
+
+```bash
+python prover.py "x*y" "x*Log[x] + Exp[y]" "x, y" "x > 1, y > 0"
+python prover.py "Log[x]" "x^eps" "x" "x >= 1, eps > 0, eps < 1" --parameters eps   # C may depend on eps
+python prover.py "1/x" "1" "x" "x > 0" --eventually x                                # only for x large
+python prover.py "x^2" "x" "x" "x > 1" --json
+```
+
+```python
+from prover import prove_bigO
+r = prove_bigO("(x*y*z)^(1/3)", "(x+y+z)/3", "x, y, z", "x>0, y>0, z>0")
+r.proved, r.constant, r.message
+```
+
+What it does that the old single `Resolve[Implies[...]]` call did not:
+
+- **Constant ladder.** Tries `C = 1, 2, 4, 10, 100, 1000, 10^6`, then solves for
+  the best constant symbolically (`Reduce` in `C`) and via the exact maximum of
+  `lhs/rhs` (`MaxValue`).  The old code tried only `C = 1` and reported "This is
+  False" when `C = 1` failed, which is wrong whenever a bigger constant works.
+- **Real disproofs.** "Disproved" is printed only when Mathematica proves that no
+  constant works: the ratio `lhs/rhs` is unbounded, or `rhs = 0` somewhere with
+  `lhs > 0`, or the ratio tends to infinity along an explicit path, or `Resolve`
+  proves "for every C there is a bad point".  Otherwise a counterexample for the
+  largest constant tried is reported and the status is `unknown`.
+- **Several methods and rewrites.** `Resolve`, `Reduce`, `Simplify`,
+  `FullSimplify`, each on the original statement and on equivalent rewrites
+  (`x -> E^u` when logs are present, `x -> t^q` for roots, shifting `y >= g(x)`
+  to `y = g(x) + s`, expanding `Max`/`Min`/`Abs`).  Young's inequality
+  `x*y << x*Log[x] + Exp[y]` is now proved directly on the whole domain in about
+  40 s; before, it needed an LLM decomposition.
+- **Sanity checks first.** Empty domain, symbols that are not declared as
+  variables (`e` for Euler's number, `pi`, a stray `a`), functions Mathematica
+  does not know (`foo(x)`), expressions that are not real on the domain
+  (`x^(1/3)` for `x < 0`), a right-hand side that is negative somewhere (then
+  `lhs << rhs` makes no sense; use `absolute=True` for `|lhs| <= C |rhs|`), a
+  left-hand side that can be negative (a warning: the proof is one-sided), and
+  `rhs = 0` points.
+- **Input cleaning.** Accepts `x**2`, `log(x)`, `sqrt(x)`, `≤`, `≥`, conditions
+  separated by commas or `&&`, and renames variables that clash with Mathematica
+  (`C`, `D`, `E`, `I`, `N`, `K`, `O`...).
+- **Constants depending on parameters.** With `parameters="eps"` the prover looks
+  for `C = f(eps)`: `Log[x] <= (1/eps) x^eps` for `x >= 1`, `0 < eps < 1`.
+- **"For x large enough."** With `eventually="x"` the estimate only has to hold
+  for `x >= T` for some threshold `T` (thresholds 1, 10, ..., 10^6 are tried),
+  which is what `f(x) << g(x)` as `x -> Infinity` means.  A disproof then has
+  to show that `lhs/rhs` blows up for arbitrarily large `x` (along a path, or
+  after maximising over the other variables), not merely somewhere.
+- **Integer variables.** `Element[n, Integers]` is relaxed to real `n`: a proof
+  for real `n` covers the integers, and a failure for real `n` is reported as
+  `unknown`, not as a disproof.
+- **Time limits that hold.** Every Mathematica call has a time limit.  Since
+  `TimeConstrained` does not always interrupt the kernel, a watchdog in Python
+  kills a stuck kernel, restarts it, and replays the finished steps from a log,
+  so one hard sub-problem never blocks the rest.  No stray kernels are left
+  behind.
+- **Coverage check for decompositions.** When the LLM proposes subdomains,
+  `check_coverage` makes Mathematica confirm that their union is the whole
+  domain.  "Proved everywhere" is printed only if that check passes; before,
+  a proof on pieces that missed part of the domain was reported as a full proof.
+
+Tests: `python tests/run_cases.py` (about 50 inequalities with expected
+answers, ~5 min) and `pytest tests/` (unit tests plus a watchdog test).
+
+On Princeton's Della cluster: `module load mathematica/14.2.0` puts the kernel
+on the PATH; otherwise set `WOLFRAM_KERNEL=/path/to/wolfram` (fast, ~2 s
+start-up) or `WOLFRAMSCRIPT=/path/to/wolframscript`.
+
 ## CLI
 You can now add the questions you want to prove in the examples.py file, and then attempt to prove them by running
 ```bash

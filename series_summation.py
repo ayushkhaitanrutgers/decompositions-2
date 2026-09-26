@@ -2,13 +2,29 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, Optional
 import pathlib
 import re
 import subprocess
 
-from llm_client import api_call, api_call_series
 import mathematica_export as wl
+from prover import prove_bigO, split_conditions, to_wolfram
+
+
+def api_call_series(prompt: str, **kwargs):
+    """Ask the LLM (imported lazily so the module loads without google-genai)."""
+    from llm_client import api_call_series as _api_call_series
+
+    return _api_call_series(prompt=prompt, **kwargs)
+
+
+def _substitute_index(formula: str, index: str, replacement: str) -> str:
+    """Replace the summation index (as a whole word) by `replacement`.
+
+    The old code did formula.replace('d', '-d'), which also rewrote the 'd'
+    inside names such as 'Round' or a parameter called 'delta', and ignored
+    the actual index name."""
+    return re.sub(r"(?<![A-Za-z0-9_])" + re.escape(index) + r"(?![A-Za-z0-9_])", replacement, formula)
 
 
 def wl_run_file(code: str, form: str = "InputForm") -> str:
@@ -28,41 +44,13 @@ def wl_run_file(code: str, form: str = "InputForm") -> str:
         script_path.write_text(wrapped)
         cmd = [wl.WOLFRAMSCRIPT, "-file", str(script_path)]
         print(f"[wolfram] Using local wolframscript {wl.WOLFRAMSCRIPT}", flush=True)
-        return subprocess.check_output(cmd, text=True, env=env).strip()
+        return wl._run_with_timeout(cmd, wl._WOLFRAM_TIMEOUT).strip()  # type: ignore[attr-defined]
 
-#The following is to separate the executables
-def attempt_proof(vars,conds, lhs, rhs):
-    # Demo usages
-    for c in range(1):
-        status= False
-        # normalize WL heads without changing math content
-        lhs_wl = lhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
-        rhs_wl = rhs.replace('exp[', 'Exp[').replace('log[', 'Log[')
-        # ensure proper braces/sequence for vars and conds
-        vars_text = vars.strip()
-        if vars_text.startswith('{') and vars_text.endswith('}'):
-            vars_text = vars_text[1:-1]
-        conds_text = conds.strip()
-        if conds_text.startswith('{') and conds_text.endswith('}'):
-            conds_text = conds_text[1:-1]
-        a = wl.wl_eval(f"""witnessBigO[vars_, conds_, lhs_, rhs_, c_] := 
-  Module[{{S}}, S = If[conds === {{}}, True, And @@ conds];
-   Resolve[ForAll[vars, Implies[S, lhs <= 10^c*rhs]], Reals]];
+def attempt_proof(vars, conds, lhs, rhs):
+    """Kept for backwards compatibility; the robust prover does the work now."""
+    return wl.attempt_proof(vars, conds, lhs, rhs)
 
-witnessBigO[{{{vars_text}}}, {{{conds_text}}}, {lhs_wl}, {rhs_wl}, {c}]
-    """)
-        if a == 'True':
-            status = True
-            return 'It is proved'
-            break
-        elif a == 'False':
-            status = True
-            return 'This is False'
-        else:
-            continue
-    if status == False:
-        return 'Status unknown. Try a different setup'
-    
+
 @dataclass
 class series_to_bound:
     formula : str
@@ -71,6 +59,7 @@ class series_to_bound:
     other_variables: str
     summation_bounds: List[str]
     conjectured_upper_asymptotic_bound: str
+    breakpoints: Optional[List[str]] = None   # optional: skip the LLM and use these
     
 
     
@@ -79,7 +68,7 @@ def ask_llm_series(series: series_to_bound):
     
     if series.summation_bounds[0][0]=='-' and series.summation_bounds[1][0]=='-':
         series_temp = series_to_bound(
-            formula=series.formula.replace('d','-d'),
+            formula=_substitute_index(series.formula, series.summation_index, "(-" + series.summation_index + ")"),
             conditions=series.conditions,
             summation_index=series.summation_index,
             other_variables=series.other_variables,
@@ -92,7 +81,7 @@ def ask_llm_series(series: series_to_bound):
         
     if series.summation_bounds[0][0]=='-' and not series.summation_bounds[1][0]=='-':
         series_temp_1 = series_to_bound(
-            formula=series.formula.replace('d','(-d)'),
+            formula=_substitute_index(series.formula, series.summation_index, "(-" + series.summation_index + ")"),
             conditions=series.conditions,
             summation_index=series.summation_index,
             other_variables=series.other_variables,
@@ -158,155 +147,181 @@ def ask_llm_series(series: series_to_bound):
     </output_format>
     </code_editing_rules>
     """
-    response = api_call_series(prompt=prompt)
-    if response[0]=='[' and response[-1]==']':
-        response = '{'+response[1:-1]+'}'
-    print(response)
+    breakpoints = getattr(series, "breakpoints", None)
+    if breakpoints:
+        # Breakpoints given by hand: no LLM call needed.
+        response = "[" + ", ".join(str(b) for b in breakpoints) + "]"
+    else:
+        try:
+            response = api_call_series(prompt=prompt)
+        except Exception as exc:
+            print(f"Failed to obtain breakpoints from the LLM: {exc}")
+            print("Tip: give them by hand with series_to_bound(..., breakpoints=[...]).")
+            return
+    response = (response or "").strip()
+    if not (response.startswith("[") and response.endswith("]")):
+        print(f"Could not read a list of breakpoints from: {response!r}")
+        return
+    response = "{" + response[1:-1] + "}"
+    print("Breakpoints:", response)
     
-    count=0
+    # The old code re-installed the "UnitTable" paclet on every run, which
+    # needs internet access and can hang on a cluster node.  Nothing here
+    # uses units, so just load it if it is already present, with a time limit.
+    paclet_setup = 'Quiet[TimeConstrained[Check[Needs["UnitTable`"], Null], 5, Null]];'
+
+    ante_code = "True" if getattr(series, "conditions", "") == "" else series.conditions
+    vars_text = "True" if getattr(series, "other_variables", "") == "" else series.other_variables
+
+    if vars_text.startswith("{") and vars_text.endswith("}"):
+        vars_text = vars_text[1:-1].strip()
+
+    # The summation index runs over the actual summation range.  (The old
+    # code assumed index > 1 whatever the bounds were, so for a sum starting
+    # at 0 the leading term was chosen under a wrong assumption.)
+    lo, hi = series.summation_bounds[0], series.summation_bounds[1]
+    index_range = " && ".join(
+        ([f"{series.summation_index} >= {lo}"] if lo != "-Infinity" else [])
+        + ([f"{series.summation_index} <= {hi}"] if hi != "Infinity" else [])
+    ) or "True"
+
+    # One Mathematica call computes the estimate for every subrange (the
+    # integrals).  The old code repeated this whole computation five times,
+    # once per constant 10^c, and used Implies[] inside ForAll[], which makes
+    # Resolve[] fail on most non-polynomial statements.
+    result_packet = wl.wl_eval_json(
+    f"""
+    Clear[LeadingSummand, DominancePiecewise, LeastSummand, 
+    AntiDominancePiecewise, expandPowersInProductNoNumbers, reducedForm,
+    createAssums, calculateEstimates, expr, baseAssums];
+
+    logMessages = Table[Null, {0}];
+    log[s_String] := AppendTo[logMessages, s];
+    logForm[label_String, expr_] := log[label <> ": " <> ToString[expr, InputForm]];
+
+    {paclet_setup}
     
-    paclet_setup = (
-        """
-        Needs["PacletManager`"];
-        Quiet[Check[PacletUninstall["UnitTable"], Null]];
-        Quiet[Check[PacletInstall["UnitTable"], Null]];
-        """
-        if not getattr(wl, "_USE_WOLFRAM_CLOUD", False)
-        else "Quiet[Check[Needs[\"UnitTable`\"], Null]];"
-    )
+    termsOfSum[expr_] := 
+    Module[{{e = Expand[expr]}}, If[Head[e] === Plus, List @@ e, {{e}}]];
 
-    for c in range(5):
-        ante_code = "True" if getattr(series, "conditions", "") == "" else series.conditions
-        vars_text = "True" if getattr(series, "other_variables", "") == "" else series.other_variables
+    LeadingSummand[sum_, assum_] := 
+    Module[{{terms, vars, dominatesQ, winners}}, 
+    terms = DeleteCases[termsOfSum[sum], 0];
+    If[terms === {{}}, Return[0]];
+    If[Length[terms] == 1, Return[First[terms]]];
+    vars = Variables[{{sum, assum}}];
+    dominatesQ[t_] := 
+        Resolve[ForAll[vars, 
+        Implies[assum, And @@ Thread[t >= DeleteCases[terms, t, 1, 1]]]],
+        Reals];
+    winners = Select[terms, TrueQ@dominatesQ[#] &];
+    Which[winners =!= {{}}, First[winners], True, 
+        Simplify[DominancePiecewise[terms, assum, vars], assum]]];
 
-        if vars_text.startswith("{") and vars_text.endswith("}"):
-            vars_text = vars_text[1:-1].strip()
-        result_packet = wl.wl_eval_json(
-        f"""
-        Clear[LeadingSummand, DominancePiecewise, LeastSummand, 
-        AntiDominancePiecewise, expandPowersInProductNoNumbers, reducedForm,
-        createAssums, calculateEstimates, expr, baseAssums];
+    DominancePiecewise[terms_, assum_, vars_] := 
+    Module[{{conds}}, 
+    conds = Table[
+        Reduce[assum && And @@ Thread[ti >= DeleteCases[terms, ti, 1, 1]],
+        vars, Reals], {{ti, terms}}];
+    Piecewise[Transpose[{{terms, conds}}]]];
 
-        logMessages = Table[Null, {0}];
-        log[s_String] := AppendTo[logMessages, s];
-        logForm[label_String, expr_] := log[label <> ": " <> ToString[expr, InputForm]];
+    LeastSummand[sum_, assum_] := 
+    Module[{{terms, vars, leastQ, winners}}, 
+    terms = DeleteCases[termsOfSum[sum], 0];
+    If[terms === {{}}, Return[0]];
+    If[Length[terms] == 1, Return[First[terms]]];
+    vars = Variables[{{sum, assum}}];
+    leastQ[t_] := 
+        Resolve[ForAll[vars, 
+        Implies[assum, And @@ Thread[t <= DeleteCases[terms, t, 1, 1]]]],
+        Reals];
+    winners = Select[terms, TrueQ@leastQ[#] &];
+    Which[winners =!= {{}}, First[winners], True, 
+        Simplify[AntiDominancePiecewise[terms, assum, vars], assum]]];
 
-        {paclet_setup}
-        
-        termsOfSum[expr_] := 
-        Module[{{e = Expand[expr]}}, If[Head[e] === Plus, List @@ e, {{e}}]];
+    AntiDominancePiecewise[terms_, assum_, vars_] := 
+    Module[{{conds}}, 
+    conds = Table[
+        Reduce[assum && And @@ Thread[ti <= DeleteCases[terms, ti, 1, 1]],
+        vars, Reals], {{ti, terms}}];
+    Piecewise[Transpose[{{terms, conds}}]]];
 
-        LeadingSummand[sum_, assum_] := 
-        Module[{{terms, vars, dominatesQ, winners}}, 
-        terms = DeleteCases[termsOfSum[sum], 0];
-        If[terms === {{}}, Return[0]];
-        If[Length[terms] == 1, Return[First[terms]]];
-        vars = Variables[{{sum, assum}}];
-        dominatesQ[t_] := 
-            Resolve[ForAll[vars, 
-            Implies[assum, And @@ Thread[t >= DeleteCases[terms, t, 1, 1]]]],
-            Reals];
-        winners = Select[terms, TrueQ@dominatesQ[#] &];
-        Which[winners =!= {{}}, First[winners], True, 
-            Simplify[DominancePiecewise[terms, assum, vars], assum]]];
-
-        DominancePiecewise[terms_, assum_, vars_] := 
-        Module[{{conds}}, 
-        conds = Table[
-            Reduce[assum && And @@ Thread[ti >= DeleteCases[terms, ti, 1, 1]],
-            vars, Reals], {{ti, terms}}];
-        Piecewise[Transpose[{{terms, conds}}]]];
-
-        LeastSummand[sum_, assum_] := 
-        Module[{{terms, vars, leastQ, winners}}, 
-        terms = DeleteCases[termsOfSum[sum], 0];
-        If[terms === {{}}, Return[0]];
-        If[Length[terms] == 1, Return[First[terms]]];
-        vars = Variables[{{sum, assum}}];
-        leastQ[t_] := 
-            Resolve[ForAll[vars, 
-            Implies[assum, And @@ Thread[t <= DeleteCases[terms, t, 1, 1]]]],
-            Reals];
-        winners = Select[terms, TrueQ@leastQ[#] &];
-        Which[winners =!= {{}}, First[winners], True, 
-            Simplify[AntiDominancePiecewise[terms, assum, vars], assum]]];
-
-        AntiDominancePiecewise[terms_, assum_, vars_] := 
-        Module[{{conds}}, 
-        conds = Table[
-            Reduce[assum && And @@ Thread[ti <= DeleteCases[terms, ti, 1, 1]],
-            vars, Reals], {{ti, terms}}];
-        Piecewise[Transpose[{{terms, conds}}]]];
-
-        (*robust factor extractor:always returns a list of non-\
-        numeric factors*)
-        expandPowersInProductNoNumbers[expr_] := 
-        Module[{{factors}}, 
-        factors = If[Head[expr] === Times, List @@ expr, {{expr}}];
-        factors = Replace[factors,
-        Power[base_, n_Integer?Positive] :> ConstantArray[base, n],
-        {{1}} (* only the immediate elements of factors *)
-        ];
-        factors = Flatten[factors];
-        Select[factors, Not@*NumericQ]];
+    (*robust factor extractor:always returns a list of non-\
+    numeric factors*)
+    expandPowersInProductNoNumbers[expr_] := 
+    Module[{{factors}}, 
+    factors = If[Head[expr] === Times, List @@ expr, {{expr}}];
+    factors = Replace[factors,
+    Power[base_, n_Integer?Positive] :> ConstantArray[base, n],
+    {{1}} (* only the immediate elements of factors *)
+    ];
+    factors = Flatten[factors];
+    Select[factors, Not@*NumericQ]];
 
 
-        reducedFormIndexed[expr_, assum_, idx_] := 
-        Module[{{numr, denr, simpn, simpd}}, 
-        numr = expandPowersInProductNoNumbers@
-            Numerator@Simplify[expr, Assumptions -> assum];
-        denr = 
-            expandPowersInProductNoNumbers@
-            Denominator@Simplify[expr, Assumptions -> assum];
-        simpn = Times @@ (LeadingSummand[#, assum] & /@ numr);
-        simpd = Times @@ (LeadingSummand[#, assum] & /@ denr);
-        logForm["  Numerator factors", numr];
-        logForm["  Denominator factors", denr];
-        logForm["  Leading term in numerator in subdomain_"<>ToString[idx], simpn];
-        logForm["  Leading term in denominator in subdomain_"<>ToString[idx], simpd];
-        Simplify[simpn/simpd, Assumptions -> assum]];
+    reducedFormIndexed[expr_, assum_, idx_] := 
+    Module[{{numr, denr, simpn, simpd}}, 
+    numr = expandPowersInProductNoNumbers@
+        Numerator@Simplify[expr, Assumptions -> assum];
+    denr = 
+        expandPowersInProductNoNumbers@
+        Denominator@Simplify[expr, Assumptions -> assum];
+    simpn = Times @@ (LeadingSummand[#, assum] & /@ numr);
+    simpd = Times @@ (LeadingSummand[#, assum] & /@ denr);
+    logForm["  Numerator factors", numr];
+    logForm["  Denominator factors", denr];
+    logForm["  Leading term in numerator in subdomain_"<>ToString[idx], simpn];
+    logForm["  Leading term in denominator in subdomain_"<>ToString[idx], simpd];
+    Simplify[simpn/simpd, Assumptions -> assum]];
 
-        createAssums[baseAssums_, points_] := 
-        Module[{{p}}, p = Partition[points, 2, 1];
-        baseAssums && {series.summation_index} > #[[1]] && {series.summation_index} < #[[2]] & /@ p];
+    createAssums[baseAssums_, points_] := 
+    Module[{{p}}, p = Partition[points, 2, 1];
+    baseAssums && {series.summation_index} > #[[1]] && {series.summation_index} < #[[2]] & /@ p];
 
-        calculateEstimates[expr_, baseAssums_, points_] := 
-        Module[{{assums, part}}, assums = createAssums[baseAssums, points];
-        part = Prepend[#, {series.summation_index}] & /@ Partition[points, 2, 1];
-        log["\n== Verification run =="]; 
-        logForm["Formula", expr];
-        logForm["Base assumptions", baseAssums];
-        logForm["Breakpoints", points];
-        Do[logForm["Subdomain "<>ToString[i], assums[[i]]], {{i, Length[assums]}}];
-        MapThread[
-            Integrate[reducedFormIndexed[expr, #1, #3], #2, 
-            Assumptions -> #1] &, {{assums, part, Range[Length[assums]]}}]];
+    calculateEstimates[expr_, baseAssums_, points_] := 
+    Module[{{assums, part}}, assums = createAssums[baseAssums, points];
+    part = Prepend[#, {series.summation_index}] & /@ Partition[points, 2, 1];
+    log["\n== Verification run =="]; 
+    logForm["Formula", expr];
+    logForm["Base assumptions", baseAssums];
+    logForm["Breakpoints", points];
+    Do[logForm["Subdomain "<>ToString[i], assums[[i]]], {{i, Length[assums]}}];
+    MapThread[
+        Integrate[reducedFormIndexed[expr, #1, #3], #2, 
+        Assumptions -> #1] &, {{assums, part, Range[Length[assums]]}}]];
 
-        
-        baseAssumptions = {' && '.join([series.summation_index+">1", series.conditions])};
-        res1 = Flatten@calculateEstimates[{series.formula}, baseAssumptions,{response}];
-
-        log["Trying constant C = "<>ToString[10^{c}, InputForm]];
-        res2= Resolve[ForAll[{series.other_variables}, 
-            Implies[{series.conditions}, # <= 10^{c}*{series.conjectured_upper_asymptotic_bound}]], Reals] & /@ res1;
-        logForm["Resolve results", res2];
-            
-        <|"Logs" -> logMessages, "Result" -> If[AllTrue[res2, TrueQ], True, res2]|>
-        """)
-
-        for line in result_packet.get("Logs", []):
-            print(line)
-        print(result_packet)
-        a = result_packet.get("Result")
-        if a is True:
-            print("All estimates verified")
-            break
-        else:
-            count += 1
-            print("Not verified")
-    if count == 5:
-        print("Try prompting the LLM again. The verification has failed up to a positive constant C = 10^4")
     
+    baseAssumptions = {' && '.join([index_range] + ([series.conditions] if ante_code != "True" else []))};
+    res1 = Flatten@calculateEstimates[{series.formula}, baseAssumptions,{response}];
+
+    <|"Logs" -> logMessages, "Estimates" -> (ToString[#, InputForm] & /@ res1)|>
+    """)
+
+    for line in result_packet.get("Logs", []):
+        print(line)
+    estimates = result_packet.get("Estimates") or []
+    if not estimates:
+        print("Not verified: Mathematica returned no estimates.")
+        return
+
+    # Each estimate must be << the conjectured bound.  The robust prover tries
+    # constants 1, 2, 4, 10, ..., 10^6 and several methods, with time limits.
+    all_ok = True
+    for i, est in enumerate(estimates, start=1):
+        print(f"Estimate for subrange {i}: {est}")
+        if "Integrate[" in est or "ConditionalExpression" in est or "Piecewise" in est:
+            print("  Not verified: the integral has no usable closed form.")
+            all_ok = False
+            continue
+        r = prove_bigO(est, series.conjectured_upper_asymptotic_bound, vars_text, ante_code)
+        print("  " + str(r).replace("\n", "\n  "))
+        if r.status != "proved":
+            all_ok = False
+    if all_ok:
+        print("All estimates verified")
+    else:
+        print("Not verified. Try prompting the LLM again, or a different set of breakpoints.")
+
 series_1 = series_to_bound(formula = "(2*d+1)/(2*h^2*(1+d*(d+1)/(h^2))(1+d*(d+1)/(h^2*m^2))^2)", conditions = "h >1 && m > 1", summation_index="d", other_variables="{h,m}", summation_bounds=["0","Infinity"], conjectured_upper_asymptotic_bound="1+Log[m^2]")
 
 # --- CLI entrypoint ---
